@@ -1,0 +1,78 @@
+---
+name: Go service skeleton
+output: "{{ .name }}.go"
+fields:
+  - key: name
+    type: input
+    label: Package name (also the output filename, so use lowercase letters)
+    required: true
+    default: myservice
+  - key: description
+    type: text
+    label: Package documentation
+    required: true
+    default: Package myservice does something useful.
+  - key: license
+    type: select
+    label: License header
+    default: apache
+    options:
+      - label: Apache 2.0
+        value: apache
+      - label: MIT
+        value: mit
+      - label: No license header
+        value: none
+  - key: features
+    type: multiselect
+    label: Include building blocks
+    default: [logging]
+    options:
+      - label: Structured logging
+        value: logging
+      - label: Graceful shutdown
+        value: shutdown
+      - label: Health endpoint
+        value: health
+  - key: dockerfile
+    type: confirm
+    label: Mention Docker in the README?
+    default: true
+---
+{{- if eq .license "apache" }}// Licensed under the Apache License, Version 2.0.
+{{- else if eq .license "mit" }}// Licensed under the MIT License.
+{{- end }}
+/*
+{{ .description }}
+*/
+package {{ .name }}
+
+{{- $logging := false }}
+{{- $shutdown := false }}
+{{- $health := false }}
+{{- range .features }}
+  {{- if eq . "logging" }}{{ $logging = true }}{{ end }}
+  {{- if eq . "shutdown" }}{{ $shutdown = true }}{{ end }}
+  {{- if eq . "health" }}{{ $health = true }}{{ end }}
+{{- end }}
+
+// Selected building blocks: {{ range $i, $feature := .features }}{{ if $i }}, {{ end }}{{ $feature }}{{ end }}
+{{- if .dockerfile }}
+// A Dockerfile is described in the project README.
+{{- end }}
+
+{{ if $logging }}import "log/slog"
+{{ end }}import "os"
+
+func main() {
+{{- if $logging }}
+	slog.Info("starting {{ .name }}")
+{{- end }}
+{{- if $health }}
+	// Serve /healthz for liveness probes.
+{{- end }}
+{{- if $shutdown }}
+	// Wait for SIGINT and SIGTERM before exiting.
+{{- end }}
+	os.Exit(0)
+}
