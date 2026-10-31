@@ -260,6 +260,33 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
+func TestParseIndentedDelimiterInDefault(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		source := strings.ReplaceAll(`---
+output: note.md
+fields:
+  - key: note
+    type: text
+    default: |
+      before
+      ---
+      after
+---
+{{ .note }}
+`, "\n", newline)
+		template, err := Parse("note.tmpl", []byte(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := template.Fields[0].DefaultString(); got != "before\n---\nafter\n" {
+			t.Fatalf("default = %q", got)
+		}
+		if template.Body != "{{ .note }}"+newline {
+			t.Fatalf("body = %q", template.Body)
+		}
+	}
+}
+
 func TestParseFrontMatterIsNotPartOfBody(t *testing.T) {
 	template, err := Parse("x.md", []byte("---\noutput: x.md\nfields: []\n---\nline one\n---\nline two\n"))
 	if err != nil {

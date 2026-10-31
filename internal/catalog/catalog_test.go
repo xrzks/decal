@@ -100,6 +100,25 @@ func TestLoadDiscoversAndSorts(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresDotEntries(t *testing.T) {
+	root := t.TempDir()
+	writeTemplate(t, filepath.Join(root, "docs", "a.md"), simpleTemplate("a.md", "a"))
+	// Editor, Finder and version-control metadata must not be parsed.
+	writeTemplate(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/main\n")
+	writeTemplate(t, filepath.Join(root, "docs", ".DS_Store"), "\x00\x01binary")
+
+	categories, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(categories) != 1 || categories[0].Name != "docs" {
+		t.Fatalf("categories = %+v, want only docs", categories)
+	}
+	if len(categories[0].Templates) != 1 || categories[0].Templates[0].FileName != "a.md" {
+		t.Fatalf("templates = %+v, want only a.md", categories[0].Templates)
+	}
+}
+
 func TestLoadErrors(t *testing.T) {
 	t.Run("missing root", func(t *testing.T) {
 		_, err := Load(filepath.Join(t.TempDir(), "missing"))

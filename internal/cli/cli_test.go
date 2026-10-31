@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
 
 	"templ/internal/catalog"
 )
@@ -348,11 +348,23 @@ func TestRunExampleServiceTemplate(t *testing.T) {
 
 func TestRequiredValidators(t *testing.T) {
 	requiredInput := catalog.Field{Key: "name", Type: catalog.FieldInput, Required: true}
-	if err := requiredString(requiredInput)("   "); err == nil {
+	if err := requiredString(requiredInput, false)("   "); err == nil {
 		t.Fatal("required input accepted a blank value")
 	}
-	if err := requiredString(catalog.Field{Key: "name"})(""); err != nil {
+	if err := requiredString(catalog.Field{Key: "name"}, false)(""); err != nil {
 		t.Fatalf("optional input rejected an empty value: %v", err)
+	}
+
+	defaulted := catalog.Field{Key: "name", Type: catalog.FieldInput, Required: true, Default: "myservice"}
+	if err := requiredString(defaulted, false)(""); err == nil {
+		t.Fatal("full-screen required input accepted a blank value with a default")
+	}
+	if err := requiredString(defaulted, true)(""); err != nil {
+		t.Fatalf("accessible required input rejected a blank value that falls back to its default: %v", err)
+	}
+	blankDefault := catalog.Field{Key: "name", Type: catalog.FieldInput, Required: true, Default: "  "}
+	if err := requiredString(blankDefault, true)(""); err == nil {
+		t.Fatal("accessible required input accepted a blank line whose default is also blank")
 	}
 
 	validateSelection := requiredSelection(catalog.Field{Key: "features", Type: catalog.FieldMultiSelect, Required: true})

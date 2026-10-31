@@ -4,7 +4,6 @@ package generate
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,26 +53,22 @@ func Write(dir, name string, data []byte) (string, error) {
 	path := filepath.Join(dir, name)
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		if errors.Is(err, fs.ErrExist) {
+		if errors.Is(err, os.ErrExist) {
 			return "", fmt.Errorf("%w: %s", ErrExists, path)
 		}
 		return "", fmt.Errorf("cannot create %s: %w", path, err)
 	}
 
+	// The file is ours alone: O_EXCL proved it did not exist a moment ago, so
+	// an incomplete file is safe to remove.
 	if err := writeFile(file, data); err != nil {
 		file.Close()
-		removeCreated(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("cannot write %s: %w", path, err)
 	}
 	if err := file.Close(); err != nil {
-		removeCreated(path)
+		_ = os.Remove(path)
 		return "", fmt.Errorf("cannot write %s: %w", path, err)
 	}
 	return path, nil
-}
-
-func removeCreated(path string) {
-	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-		_ = os.Remove(path)
-	}
 }

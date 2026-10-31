@@ -13,11 +13,13 @@ import (
 
 	"templ/internal/catalog"
 	"templ/internal/generate"
-	"templ/internal/render"
 )
 
 // ErrCancelled reports that the user aborted a prompt.
 var ErrCancelled = errors.New("cancelled")
+
+// ErrNoTerminal reports that the prompts cannot run without a terminal.
+var ErrNoTerminal = errors.New("templ needs an interactive terminal; set TERM=dumb to answer prompts from stdin")
 
 // Prompter collects a category, a template and a template's form answers.
 type Prompter interface {
@@ -80,29 +82,31 @@ func Run(ctx context.Context, root string, prompter Prompter, dir string, out io
 
 	answers := map[string]any{}
 	if len(template.Fields) > 0 {
-		answers, err = prompter.Form(ctx, template)
-		if err != nil {
+		if answers, err = prompter.Form(ctx, template); err != nil {
 			return err
 		}
 	}
 
-	name, err := render.OutputName(template.Output, answers)
-	if err != nil {
-		return fmt.Errorf("template %s: %w", template.Path, err)
-	}
-	body, err := render.Body(template.Body, answers)
-	if err != nil {
-		return fmt.Errorf("template %s: %w", template.Path, err)
-	}
-	if err := generate.ValidateName(name); err != nil {
-		return fmt.Errorf("template %s: %w", template.Path, err)
-	}
-
-	path, err := generate.Write(dir, name, []byte(body))
+	path, err := produce(template, answers, dir)
 	if err != nil {
 		return fmt.Errorf("template %s: %w", template.Path, err)
 	}
 
 	fmt.Fprintf(out, "Created %s\n", path)
 	return nil
+}
+
+// produce renders a template and writes its output file. Both parts are
+// rendered in full before the destination is touched; generate.Write validates
+// the resulting name and never overwrites.
+func produce(template *catalog.Template, answers map[string]any, dir string) (string, error) {
+	name, err := renderPart("output filename", template.Output, answers)
+	if err != nil {
+		return "", err
+	}
+	body, err := renderPart("body", template.Body, answers)
+	if err != nil {
+		return "", err
+	}
+	return generate.Write(dir, name, []byte(body))
 }

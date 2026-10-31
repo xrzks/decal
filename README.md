@@ -42,8 +42,10 @@ directly inside a category are templates:
     └── go-service.tmpl
 ```
 
-Discovery is not recursive and symlinks are not followed. Categories and
-templates are listed sorted by display name, with the filename as a tie-breaker.
+Discovery is not recursive and symlinks are not followed. Dot-prefixed
+directories and files are ignored, so `.git` or `.DS_Store` entries never break
+discovery. Categories and templates are listed sorted by display name, with the
+filename as a tie-breaker.
 A missing root, a root without categories, a category without templates, an
 unreadable template, or malformed metadata all stop the command with a message
 naming the offending path before any prompt or output file exists.
@@ -163,6 +165,22 @@ errors (`missingkey=error`), never silently empty. Parsing and rendering happen
 entirely before the destination file is touched, and errors name whether they
 came from the metadata, the output filename, or the body.
 
+## Non-interactive use
+
+The prompts need a terminal. When stdin is not a terminal, `templ` stops with
+an error instead of stalling, and suggests setting `TERM=dumb`. In that mode
+[Huh](https://github.com/charmbracelet/huh) answers one line per prompt from
+stdin, which makes the command scriptable:
+
+```console
+$ printf '2\n1\nmyservice\n' | TERM=dumb templ --config-dir ./examples/templates
+```
+
+A blank line takes the field's default. Input is validated as it is read: an
+end-of-input before the last prompt answers it cancels the run, and an answer
+line longer than 64 KiB is rejected rather than silently replaced by the
+default.
+
 ## Safety
 
 - The rendered output must be a single filename directly in the current working
@@ -213,6 +231,6 @@ $ go test ./...
 ```
 
 The packages are kept independently testable: `internal/catalog` (discovery and
-metadata), `internal/render` (template execution), `internal/generate` (filename
-validation and exclusive creation), and `internal/cli` (the Huh-driven workflow,
-tested through a fake prompter).
+metadata), `internal/generate` (filename validation and exclusive creation), and
+`internal/cli` (template rendering and the Huh-driven workflow, tested through a
+fake prompter).

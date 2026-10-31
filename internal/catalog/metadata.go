@@ -42,28 +42,13 @@ type Field struct {
 }
 
 // DefaultString returns the field's default for string-valued fields.
-func (f Field) DefaultString() string {
-	if s, ok := f.Default.(string); ok {
-		return s
-	}
-	return ""
-}
+func (f Field) DefaultString() string { s, _ := f.Default.(string); return s }
 
 // DefaultStrings returns the field's default selection for multiselect fields.
-func (f Field) DefaultStrings() []string {
-	if values, ok := f.Default.([]string); ok {
-		return values
-	}
-	return nil
-}
+func (f Field) DefaultStrings() []string { values, _ := f.Default.([]string); return values }
 
 // DefaultBool returns the field's default for confirm fields.
-func (f Field) DefaultBool() bool {
-	if b, ok := f.Default.(bool); ok {
-		return b
-	}
-	return false
-}
+func (f Field) DefaultBool() bool { b, _ := f.Default.(bool); return b }
 
 func (f Field) hasOption(value string) bool {
 	for _, option := range f.Options {
@@ -149,7 +134,7 @@ func splitFrontMatter(data []byte) (front, body []byte, err error) {
 	}
 
 	line, next := nextLine(rest)
-	if string(bytes.TrimSpace(line)) != "---" {
+	if string(bytes.TrimRight(line, " \t\r")) != "---" {
 		return nil, nil, errors.New(`file must start with a "---" front matter line`)
 	}
 	rest = next
@@ -161,7 +146,7 @@ func splitFrontMatter(data []byte) (front, body []byte, err error) {
 		}
 		line, next := nextLine(rest)
 		lineStart := len(data) - len(rest)
-		if string(bytes.TrimSpace(line)) == "---" {
+		if string(bytes.TrimRight(line, " \t\r")) == "---" {
 			return data[frontStart:lineStart], next, nil
 		}
 		if len(next) == 0 {
@@ -254,32 +239,15 @@ func parseDefault(field Field, node yaml.Node) (any, error) {
 
 	switch field.Type {
 	case FieldInput, FieldText:
-		if node.Tag != "!!str" {
-			return nil, fmt.Errorf("field %q: default must be a string", field.Key)
-		}
-		var value string
-		if err := node.Decode(&value); err != nil {
-			return nil, fmt.Errorf("field %q: default must be a string", field.Key)
-		}
-		return value, nil
+		return decodeDefault[string](field, node, "!!str", "a string")
 
 	case FieldConfirm:
-		if node.Tag != "!!bool" {
-			return nil, fmt.Errorf("field %q: default must be a boolean", field.Key)
-		}
-		var value bool
-		if err := node.Decode(&value); err != nil {
-			return nil, fmt.Errorf("field %q: default must be a boolean", field.Key)
-		}
-		return value, nil
+		return decodeDefault[bool](field, node, "!!bool", "a boolean")
 
 	case FieldSelect:
-		if node.Tag != "!!str" {
-			return nil, fmt.Errorf("field %q: default must be a string", field.Key)
-		}
-		var value string
-		if err := node.Decode(&value); err != nil {
-			return nil, fmt.Errorf("field %q: default must be a string", field.Key)
+		value, err := decodeDefault[string](field, node, "!!str", "a string")
+		if err != nil {
+			return nil, err
 		}
 		if !field.hasOption(value) {
 			return nil, fmt.Errorf("field %q: default %q is not one of the declared options", field.Key, value)
@@ -312,5 +280,19 @@ func parseDefault(field Field, node yaml.Node) (any, error) {
 		return values, nil
 	}
 
-	return nil, fmt.Errorf("field %q: cannot validate the default for type %s", field.Key, field.Type)
+	// Unreachable: parseFields rejects every type not handled above.
+	return nil, nil
+}
+
+// decodeDefault decodes a default of the given YAML tag into T. yaml.v3 coerces
+// numbers and booleans into strings, so the tag is checked explicitly.
+func decodeDefault[T any](field Field, node yaml.Node, tag, want string) (T, error) {
+	var value T
+	if node.Tag != tag {
+		return value, fmt.Errorf("field %q: default must be %s", field.Key, want)
+	}
+	if err := node.Decode(&value); err != nil {
+		return value, fmt.Errorf("field %q: default must be %s", field.Key, want)
+	}
+	return value, nil
 }

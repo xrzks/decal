@@ -2,12 +2,14 @@
 package catalog
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 )
 
 // Category is a directory full of templates.
@@ -69,7 +71,7 @@ func Load(root string) ([]Category, error) {
 
 	categories := make([]Category, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || isHidden(entry.Name()) {
 			continue
 		}
 		category, err := loadCategory(entry.Name(), filepath.Join(root, entry.Name()))
@@ -82,14 +84,15 @@ func Load(root string) ([]Category, error) {
 		return nil, fmt.Errorf("no categories found in %s; add one directory per category", root)
 	}
 
-	sort.Slice(categories, func(i, j int) bool {
-		if categories[i].Name != categories[j].Name {
-			return categories[i].Name < categories[j].Name
-		}
-		return categories[i].Dir < categories[j].Dir
-	})
+	// Directory names are unique, so Name alone is a total order.
+	slices.SortFunc(categories, func(a, b Category) int { return strings.Compare(a.Name, b.Name) })
 	return categories, nil
 }
+
+// isHidden reports whether name belongs to a dot entry. Discovery ignores
+// those so that editor, Finder and version-control metadata is not parsed as a
+// template.
+func isHidden(name string) bool { return strings.HasPrefix(name, ".") }
 
 func loadCategory(name, dir string) (Category, error) {
 	entries, err := os.ReadDir(dir)
@@ -99,7 +102,7 @@ func loadCategory(name, dir string) (Category, error) {
 
 	category := Category{Name: name, Dir: dir}
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() {
+		if !entry.Type().IsRegular() || isHidden(entry.Name()) {
 			continue
 		}
 		template, err := loadTemplate(filepath.Join(dir, entry.Name()))
@@ -112,11 +115,9 @@ func loadCategory(name, dir string) (Category, error) {
 		return Category{}, fmt.Errorf("category %q in %s contains no templates", name, filepath.Dir(dir))
 	}
 
-	sort.Slice(category.Templates, func(i, j int) bool {
-		if category.Templates[i].Name != category.Templates[j].Name {
-			return category.Templates[i].Name < category.Templates[j].Name
-		}
-		return category.Templates[i].FileName < category.Templates[j].FileName
+	// Display names may collide, so fall back to the filename.
+	slices.SortFunc(category.Templates, func(a, b *Template) int {
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.FileName, b.FileName))
 	})
 	return category, nil
 }
