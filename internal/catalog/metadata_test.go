@@ -238,6 +238,26 @@ func TestParseErrors(t *testing.T) {
 			want:   `default "y" is not one of the declared options`,
 		},
 		{
+			name:   "body syntax error",
+			source: "---\noutput: a.txt\n---\n{{ if .x }}\n",
+			want:   "body: cannot parse template",
+		},
+		{
+			name:   "output syntax error",
+			source: "---\noutput: \"{{ .x \"\n---\nbody\n",
+			want:   "output filename: cannot parse template",
+		},
+		{
+			name:   "key unusable in templates",
+			source: "---\noutput: a.txt\nfields:\n  - key: my-key\n    type: input\n---\nbody\n",
+			want:   `key "my-key" must be letters, digits and underscores`,
+		},
+		{
+			name:   "key starting with a digit",
+			source: "---\noutput: a.txt\nfields:\n  - key: 1st\n    type: input\n---\nbody\n",
+			want:   `key "1st" must be letters`,
+		},
+		{
 			name:   "multiselect duplicate default",
 			source: "---\noutput: a.txt\nfields:\n  - key: a\n    type: multiselect\n    options:\n      - value: x\n    default: [x, x]\n---\nbody\n",
 			want:   `default lists "x" more than once`,

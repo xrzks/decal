@@ -39,12 +39,13 @@ type Template struct {
 }
 
 // Root resolves the template root directory. An explicit override wins, then
-// $XDG_CONFIG_HOME/templ, then ~/.config/templ.
+// $XDG_CONFIG_HOME/templ when it is absolute, then ~/.config/templ.
 func Root(override string) (string, error) {
 	if override != "" {
 		return filepath.Abs(override)
 	}
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+	// The XDG spec says to ignore relative values.
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
 		return filepath.Join(xdg, "templ"), nil
 	}
 	home, err := os.UserHomeDir()
@@ -56,7 +57,7 @@ func Root(override string) (string, error) {
 
 // Load discovers categories and templates below root. Immediate child
 // directories are categories; regular files directly inside them are
-// templates. Symlinks are not followed.
+// templates. Symlinks are followed, so dotfile managers like GNU stow work.
 func Load(root string) ([]Category, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -71,7 +72,14 @@ func Load(root string) ([]Category, error) {
 
 	categories := make([]Category, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() || isHidden(entry.Name()) {
+		if isHidden(entry.Name()) {
+			continue
+		}
+		mode, err := entryMode(root, entry)
+		if err != nil {
+			return nil, err
+		}
+		if !mode.IsDir() {
 			continue
 		}
 		category, err := loadCategory(entry.Name(), filepath.Join(root, entry.Name()))
@@ -94,6 +102,19 @@ func Load(root string) ([]Category, error) {
 // template.
 func isHidden(name string) bool { return strings.HasPrefix(name, ".") }
 
+// entryMode returns the type of the file entry names, resolving symlinks.
+func entryMode(dir string, entry fs.DirEntry) (fs.FileMode, error) {
+	if entry.Type()&fs.ModeSymlink == 0 {
+		return entry.Type(), nil
+	}
+	path := filepath.Join(dir, entry.Name())
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("cannot follow symlink %s: %w", path, err)
+	}
+	return info.Mode(), nil
+}
+
 func loadCategory(name, dir string) (Category, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -102,7 +123,14 @@ func loadCategory(name, dir string) (Category, error) {
 
 	category := Category{Name: name, Dir: dir}
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || isHidden(entry.Name()) {
+		if isHidden(entry.Name()) {
+			continue
+		}
+		mode, err := entryMode(dir, entry)
+		if err != nil {
+			return Category{}, err
+		}
+		if !mode.IsRegular() {
 			continue
 		}
 		template, err := loadTemplate(filepath.Join(dir, entry.Name()))

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
+	texttemplate "text/template"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -113,6 +115,15 @@ func Parse(path string, data []byte) (*Template, error) {
 		Output:   raw.Output,
 		Body:     string(body),
 	}
+	// Catch syntax errors before the user fills in a form, not after.
+	for _, part := range []struct{ name, source string }{
+		{"output filename", template.Output},
+		{"body", template.Body},
+	} {
+		if _, err := texttemplate.New(part.name).Parse(part.source); err != nil {
+			return nil, fail("%s: cannot parse template: %v", part.name, err)
+		}
+	}
 	if raw.Name != nil && strings.TrimSpace(*raw.Name) != "" {
 		template.Name = strings.TrimSpace(*raw.Name)
 	}
@@ -163,6 +174,10 @@ func nextLine(data []byte) (line, rest []byte) {
 	return data, nil
 }
 
+// keyPattern matches the names text/template accepts after a dot, so every
+// answer is reachable as {{ .key }}.
+var keyPattern = regexp.MustCompile(`^[\pL_][\pL\p{Nd}_]*$`)
+
 func parseFields(raw []rawField) ([]Field, error) {
 	fields := make([]Field, 0, len(raw))
 	seen := make(map[string]bool, len(raw))
@@ -171,6 +186,9 @@ func parseFields(raw []rawField) ([]Field, error) {
 		key := strings.TrimSpace(rawField.Key)
 		if key == "" {
 			return nil, fmt.Errorf("fields[%d]: key is required", i)
+		}
+		if !keyPattern.MatchString(key) {
+			return nil, fmt.Errorf("fields[%d]: key %q must be letters, digits and underscores, not starting with a digit", i, key)
 		}
 		if seen[key] {
 			return nil, fmt.Errorf("fields[%d]: duplicate key %q", i, key)

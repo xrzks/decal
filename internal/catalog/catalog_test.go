@@ -34,6 +34,17 @@ func TestRoot(t *testing.T) {
 		}
 	})
 
+	t.Run("relative xdg config home is ignored", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "relative")
+		root, err := Root("")
+		if err != nil {
+			t.Fatalf("Root: %v", err)
+		}
+		if want := filepath.Join(home, ".config", "templ"); root != want {
+			t.Fatalf("Root = %q, want %q", root, want)
+		}
+	})
+
 	t.Run("home fallback", func(t *testing.T) {
 		t.Setenv("XDG_CONFIG_HOME", "")
 		root, err := Root("")
@@ -67,14 +78,8 @@ func TestLoadDiscoversAndSorts(t *testing.T) {
 	writeTemplate(t, filepath.Join(root, "alpha", "a.txt"), "---\nname: Same\noutput: a.txt\n---\na")
 	writeTemplate(t, filepath.Join(root, "alpha", "c.txt"), "---\nname: First\noutput: c.txt\n---\nc")
 
-	// Neither a root-level file nor symlinks are categories or templates.
+	// A root-level file is not a category.
 	writeTemplate(t, filepath.Join(root, "stray.md"), simpleTemplate("stray.md", "stray"))
-	if err := os.Symlink(filepath.Join(root, "alpha"), filepath.Join(root, "linked")); err != nil {
-		t.Fatalf("symlink category: %v", err)
-	}
-	if err := os.Symlink(filepath.Join(root, "alpha", "a.txt"), filepath.Join(root, "alpha", "link.txt")); err != nil {
-		t.Fatalf("symlink template: %v", err)
-	}
 
 	categories, err := Load(root)
 	if err != nil {
@@ -97,6 +102,33 @@ func TestLoadDiscoversAndSorts(t *testing.T) {
 	}
 	if got := categories[0].Templates[0].Body; got != "c" {
 		t.Fatalf("body = %q, want %q", got, "c")
+	}
+}
+
+func TestLoadFollowsSymlinks(t *testing.T) {
+	// GNU stow and similar tools link categories or single templates into
+	// the root from a dotfiles repository.
+	dotfiles := t.TempDir()
+	writeTemplate(t, filepath.Join(dotfiles, "linked", "a.txt"), simpleTemplate("a.txt", "a"))
+	writeTemplate(t, filepath.Join(dotfiles, "b.txt"), simpleTemplate("b.txt", "b"))
+
+	root := t.TempDir()
+	if err := os.Symlink(filepath.Join(dotfiles, "linked"), filepath.Join(root, "linked")); err != nil {
+		t.Fatalf("symlink category: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "plain"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(dotfiles, "b.txt"), filepath.Join(root, "plain", "b.txt")); err != nil {
+		t.Fatalf("symlink template: %v", err)
+	}
+
+	categories, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(categories) != 2 || categories[0].Templates[0].Body != "a" || categories[1].Templates[0].Body != "b" {
+		t.Fatalf("categories = %+v, want linked/a.txt and plain/b.txt", categories)
 	}
 }
 
@@ -161,6 +193,19 @@ func TestLoadErrors(t *testing.T) {
 		_, err := Load(root)
 		if err == nil || !strings.Contains(err.Error(), "cannot read") {
 			t.Fatalf("err = %v, want a cannot-read error", err)
+		}
+	})
+
+	t.Run("dangling symlink", func(t *testing.T) {
+		root := t.TempDir()
+		writeTemplate(t, filepath.Join(root, "docs", "a.md"), simpleTemplate("a.md", "a"))
+		link := filepath.Join(root, "docs", "gone.md")
+		if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "cannot follow symlink "+link) {
+			t.Fatalf("err = %v, want a symlink error naming %s", err, link)
 		}
 	})
 

@@ -11,6 +11,7 @@ import (
 
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
 
 	"templ/internal/catalog"
@@ -70,8 +71,13 @@ func terminalTheme(isDark bool) *huh.Styles {
 }
 
 // choose runs a single-select prompt over items, showing them in order and
-// resolving the answer back to the item whose key was selected.
+// resolving the answer back to the item whose key was selected. A lone item is
+// picked without asking, except in accessible mode, where scripted answers are
+// positional and must not shift when a second item is added.
 func choose[T any](ctx context.Context, what, title string, items []T, label, key func(T) string) (T, error) {
+	if len(items) == 1 && !accessibleMode() {
+		return items[0], nil
+	}
 	var zero T
 	byKey := make(map[string]T, len(items))
 	options := make([]huh.Option[string], 0, len(items))
@@ -106,7 +112,6 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 	var collect []func()
 
 	for _, field := range template.Fields {
-		field := field
 		switch field.Type {
 		case catalog.FieldInput:
 			value := field.DefaultString()
@@ -222,7 +227,10 @@ func runAccessible(ctx context.Context, form *huh.Form, input *promptInput) (err
 		}
 		err = input.err
 	}()
-	return form.WithInput(input).RunWithContext(ctx)
+	// Huh writes styled text straight to stdout in accessible mode; downsample
+	// it so TERM=dumb and pipes get plain text.
+	output := colorprofile.NewWriter(os.Stdout, os.Environ())
+	return form.WithInput(input).WithOutput(output).RunWithContext(ctx)
 }
 
 type promptInput struct {

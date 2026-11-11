@@ -70,6 +70,7 @@ func TestRealPrompterNoTerminal(t *testing.T) {
 	t.Setenv("TERM", "xterm")
 	root := t.TempDir()
 	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\n---\nbody\n")
+	addTemplate(t, root, "docs", "b.tmpl", "---\noutput: b.txt\n---\nbody\n")
 	dir := t.TempDir()
 	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{})
 	if !errors.Is(err, ErrNoTerminal) {
@@ -77,6 +78,43 @@ func TestRealPrompterNoTerminal(t *testing.T) {
 	}
 	if names := listDir(t, dir); len(names) != 0 {
 		t.Fatalf("non-terminal run left files behind: %v", names)
+	}
+}
+
+func TestRealPrompterPicksLoneChoicesWithoutPrompting(t *testing.T) {
+	// No prompt is needed, so no terminal is either.
+	promptStdin(t, "")
+	t.Setenv("TERM", "xterm")
+	root := t.TempDir()
+	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\n---\nbody\n")
+	dir := t.TempDir()
+	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatalf("output: %v", err)
+	}
+}
+
+func TestRealPrompterAccessibleOutputIsPlain(t *testing.T) {
+	promptStdin(t, "")
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = original })
+	root := t.TempDir()
+	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\n---\nbody\n")
+	_ = Run(context.Background(), root, huhPrompter{}, t.TempDir(), &strings.Builder{})
+	w.Close()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Choose a category") || strings.Contains(string(data), "\x1b[") {
+		t.Fatalf("prompt output = %q, want plain text", data)
 	}
 }
 

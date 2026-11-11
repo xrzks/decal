@@ -10,8 +10,9 @@ $ templ
 ```
 
 Categories and templates are discovered from your template root and presented
-with [Charmbracelet Huh](https://github.com/charmbracelet/huh) select prompts.
-The template's form (if any) follows, then the output filename and body are
+with [Charmbracelet Huh](https://github.com/charmbracelet/huh) select prompts;
+a category or template that is the only choice is picked without asking. The
+template's form (if any) follows, then the output filename and body are
 rendered with Go's [`text/template`](https://pkg.go.dev/text/template).
 
 ## Build and install
@@ -36,7 +37,7 @@ $ go build -ldflags "-X main.version=v1.0.0" -o templ .
 The template root is, in order of precedence:
 
 1. `--config-dir <path>`
-2. `$XDG_CONFIG_HOME/templ`, when `XDG_CONFIG_HOME` is set
+2. `$XDG_CONFIG_HOME/templ`, when `XDG_CONFIG_HOME` is an absolute path
 3. `~/.config/templ`
 
 Inside the root, immediate child directories are categories and regular files
@@ -50,7 +51,9 @@ directly inside a category are templates:
     └── go-service.tmpl
 ```
 
-Discovery is not recursive and symlinks are not followed. Dot-prefixed
+Discovery is not recursive. Symlinked categories and templates are followed, so
+a root managed with GNU stow or a similar tool works; a dangling symlink is an
+error. Dot-prefixed
 directories and files are ignored, so `.git` or `.DS_Store` entries never break
 discovery. Categories and templates are listed sorted by display name, with the
 filename as a tie-breaker.
@@ -95,7 +98,7 @@ Each field entry has:
 
 | Key        | Required                   | Meaning                                                                                                         |
 | ---------- | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `key`      | yes                        | Unique name used to look the answer up in the template.                                                         |
+| `key`      | yes                        | Unique name used as `{{ .key }}`: letters, digits and `_`, not starting with a digit.                           |
 | `type`     | yes                        | `input`, `text`, `select`, `multiselect`, or `confirm`.                                                         |
 | `label`    | no                         | Prompt label. Defaults to the key.                                                                              |
 | `default`  | no                         | Typed initial answer; must match the field type and its options.                                                |
@@ -114,9 +117,10 @@ Field types map to Huh controls:
 
 `false` is a real answer for `confirm`, so `required` is rejected instead of
 being interpreted as consent. Metadata is validated in full before the form is
-shown: duplicate keys, unsupported types, options on non-choice fields,
-duplicate or empty option values, incompatible defaults, and defaults outside
-the declared options all fail early.
+shown: invalid or duplicate keys, unsupported types, options on non-choice
+fields, duplicate or empty option values, incompatible defaults, defaults
+outside the declared options, and template syntax errors in `output` or the
+body all fail early.
 
 A complete example:
 
@@ -169,9 +173,10 @@ is the `name` field's answer; `{{ range .features }}` walks a multiselect
 answer.
 
 There are no custom functions, shell commands, or hooks. Undefined variables are
-errors (`missingkey=error`), never silently empty. Parsing and rendering happen
-entirely before the destination file is touched, and errors name whether they
-came from the metadata, the output filename, or the body.
+errors (`missingkey=error`), never silently empty. Both parts are parsed when
+templates are discovered, before any prompt, and rendered entirely before the
+destination file is touched. Errors name whether they came from the metadata,
+the output filename, or the body.
 
 ## Non-interactive use
 
@@ -186,6 +191,9 @@ $ printf '2\n1\nmyservice\n\n\n\n\n' | TERM=dumb templ --config-dir ./examples/t
 
 That answers the category (`2`, service), the template (`1`), and the service
 name (`myservice`), then takes the defaults for the remaining four fields.
+Unlike the full-screen prompts, this mode still asks for a category or template
+that is the only choice, so scripted answers keep their positions when a second
+one is added. Prompt text is plain, without colour codes.
 
 Each answer is one line. Selects take the option number. A multiselect prompt
 takes one option number per line, each toggling that option, until `0` or a
@@ -200,7 +208,7 @@ rejected rather than silently replaced by the default.
 | Status | Meaning                                                                  |
 | ------ | ------------------------------------------------------------------------ |
 | `0`    | The file was created, or `--help`/`--version` was printed.               |
-| `1`    | An error: configuration, metadata, rendering, or the destination.        |
+| `1`    | An error: usage, configuration, metadata, rendering, or the destination. |
 | `130`  | A prompt was cancelled (`ctrl+c`, or input ended early). No file exists. |
 
 Errors and the cancellation notice go to stderr; the `Created <path>` line goes
@@ -231,10 +239,10 @@ $ /tmp/templ --config-dir /path/to/templ/examples/templates
 ```
 
 1. **Selection:** the category prompt lists `notes` and `service`. Navigate with
-   the arrow keys or `j`/`k`, press `enter`, then pick `Meeting notes` and press
-   `enter`. No form appears; `meeting-notes.md` is created and its path is
+   the arrow keys or `j`/`k` and press `enter` on `notes`. `Meeting notes` is the
+   category's only template, so it is picked without a prompt. No form appears; `meeting-notes.md` is created and its path is
    printed. Check that the file exists and does not contain `---` front matter.
-2. **Form navigation:** run again, choose `service` and `Go service skeleton`.
+2. **Form navigation:** run again and choose `service`.
    The form shows one field per screen, so press `enter` to advance to the next.
    Fill the input (try submitting it empty first to see the required error),
    submit the multiline text with `enter` (`alt+enter` or `ctrl+j` inserts a
@@ -243,7 +251,7 @@ $ /tmp/templ --config-dir /path/to/templ/examples/templates
    `enter`. The file is named from the `name` answer and contains the rendered
    body.
 3. **Cancellation:** run again and press `ctrl+c` at the category prompt, then
-   again at the template prompt and inside the form. Each time the command
+   again inside the form. Each time the command
    prints `Cancelled. No file was created.` and `echo $?` shows `130`;
    `ls -A` shows nothing new.
 4. **Conflict:** with `meeting-notes.md` already present, run the notes template

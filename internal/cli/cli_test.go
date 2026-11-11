@@ -400,6 +400,22 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
+func TestCommandRejectsBadUsage(t *testing.T) {
+	for _, args := range [][]string{{"--bogus"}, {"extra"}} {
+		var stdout, stderr strings.Builder
+		cmd := New("test")
+		cmd.Writer, cmd.ErrWriter = &stdout, &stderr
+		err := cmd.Run(context.Background(), append([]string{"templ"}, args...))
+		if err == nil || !strings.Contains(err.Error(), "see templ --help") {
+			t.Fatalf("%v: err = %v, want a usage error", args, err)
+		}
+		// main prints the returned error; nothing else may be printed.
+		if stdout.Len() > 0 || stderr.Len() > 0 {
+			t.Fatalf("%v: printed stdout=%q stderr=%q, want nothing", args, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestRequiredValidators(t *testing.T) {
 	requiredInput := catalog.Field{Key: "name", Type: catalog.FieldInput, Required: true}
 	if err := requiredString(requiredInput, false)("   "); err == nil {

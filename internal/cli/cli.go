@@ -44,7 +44,15 @@ func New(version string) *cli.Command {
 				Usage: "template root directory (default: $XDG_CONFIG_HOME/templ or ~/.config/templ)",
 			},
 		},
+		// Return usage errors instead of printing them with the full help; main
+		// prints the returned error, so this keeps it to a single line.
+		OnUsageError: func(_ context.Context, _ *cli.Command, err error, _ bool) error {
+			return fmt.Errorf("%w (see templ --help)", err)
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Args().Present() {
+				return fmt.Errorf("unexpected argument %q (see templ --help)", cmd.Args().First())
+			}
 			root, err := catalog.Root(cmd.String("config-dir"))
 			if err != nil {
 				return err
@@ -79,9 +87,6 @@ func Run(ctx context.Context, root string, prompter Prompter, dir string, out io
 	template, err := prompter.ChooseTemplate(ctx, category.Templates)
 	if err != nil {
 		return err
-	}
-	if template == nil {
-		return fmt.Errorf("no template selected in category %q", category.Name)
 	}
 
 	answers := map[string]any{}
