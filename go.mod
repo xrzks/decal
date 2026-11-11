@@ -1,4 +1,4 @@
-module templ
+module github.com/xrzks/decal
 
 go 1.27.2
 

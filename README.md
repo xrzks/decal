@@ -1,12 +1,12 @@
-# templ
+# decal
 
-`templ` generates one file from a reusable, single-file template. Run it in the
+`decal` generates one file from a reusable, single-file template. Run it in the
 directory that should receive the file, pick a category and a template, answer
 the template's form if it has one, and the file is rendered and written there.
 
 ```console
 $ cd ~/src/new-project
-$ templ
+$ decal
 ```
 
 Categories and templates are discovered from your template root and presented
@@ -18,18 +18,24 @@ rendered with Go's [`text/template`](https://pkg.go.dev/text/template).
 ## Build and install
 
 ```console
-$ go build -o templ .
-$ install -m 0755 templ ~/.local/bin/templ   # or anywhere on $PATH
+$ go install github.com/xrzks/decal@latest
+```
+
+or from a checkout:
+
+```console
+$ go build -o decal .
+$ install -m 0755 decal ~/.local/bin/decal   # or anywhere on $PATH
 ```
 
 Requires Go 1.27 or newer.
 
-`templ --version` (or `-v`) prints the build version. A plain `go build` or
+`decal --version` (or `-v`) prints the build version. A plain `go build` or
 `go install` reports the module or VCS version Go records in the binary; to
 stamp a release version, set it at build time:
 
 ```console
-$ go build -ldflags "-X main.version=v1.0.0" -o templ .
+$ go build -ldflags "-X main.version=v1.0.0" -o decal .
 ```
 
 ## Configuration layout
@@ -37,14 +43,14 @@ $ go build -ldflags "-X main.version=v1.0.0" -o templ .
 The template root is, in order of precedence:
 
 1. `--config-dir <path>`
-2. `$XDG_CONFIG_HOME/templ`, when `XDG_CONFIG_HOME` is an absolute path
-3. `~/.config/templ`
+2. `$XDG_CONFIG_HOME/decal`, when `XDG_CONFIG_HOME` is an absolute path
+3. `~/.config/decal`
 
 Inside the root, immediate child directories are categories and regular files
 directly inside a category are templates:
 
 ```
-~/.config/templ/
+~/.config/decal/
 ├── notes/
 │   └── meeting-notes.md
 └── service/
@@ -67,7 +73,7 @@ or unreadable, or when no usable template is left.
 Try the bundled examples without touching your own configuration:
 
 ```console
-$ templ --config-dir ./examples/templates
+$ decal --config-dir ./examples/templates
 ```
 
 ## Authoring a template
@@ -189,13 +195,13 @@ metadata, the output filename, or the body.
 ## Non-interactive use
 
 The prompts are drawn on stderr, so stdout carries only the `Created <path>`
-line. They need a terminal on stdin and stderr; otherwise `templ` stops with an
+line. They need a terminal on stdin and stderr; otherwise `decal` stops with an
 error instead of stalling, and suggests setting `TERM=dumb`. In that mode
 [Huh](https://github.com/charmbracelet/huh) answers one line per prompt from
 stdin, which makes the command scriptable:
 
 ```console
-$ printf '2\n1\nmyservice\n\n\n\n\n' | TERM=dumb templ --config-dir ./examples/templates
+$ printf '2\n1\nmyservice\n\n\n\n\n' | TERM=dumb decal --config-dir ./examples/templates
 ```
 
 That answers the category (`2`, service), the template (`1`), and the service
@@ -248,9 +254,9 @@ Prompts, warnings, errors and the cancellation notice go to stderr; only the
 Build the binary and work in a scratch directory with the bundled templates:
 
 ```console
-$ go build -o /tmp/templ .
-$ mkdir -p /tmp/templ-smoke && cd /tmp/templ-smoke
-$ /tmp/templ --config-dir /path/to/templ/examples/templates
+$ go build -o /tmp/decal .
+$ mkdir -p /tmp/decal-smoke && cd /tmp/decal-smoke
+$ /tmp/decal --config-dir /path/to/decal/examples/templates
 ```
 
 1. **Selection:** the category prompt lists `notes` and `service`. Navigate with

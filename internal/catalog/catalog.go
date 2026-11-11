@@ -42,20 +42,20 @@ type Template struct {
 }
 
 // Root resolves the template root directory. An explicit override wins, then
-// $XDG_CONFIG_HOME/templ when it is absolute, then ~/.config/templ.
+// $XDG_CONFIG_HOME/decal when it is absolute, then ~/.config/decal.
 func Root(override string) (string, error) {
 	if override != "" {
 		return filepath.Abs(override)
 	}
 	// The XDG spec says to ignore relative values.
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(xdg) {
-		return filepath.Join(xdg, "templ"), nil
+		return filepath.Join(xdg, "decal"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("cannot locate the home directory; pass --config-dir instead: %w", err)
 	}
-	return filepath.Join(home, ".config", "templ"), nil
+	return filepath.Join(home, ".config", "decal"), nil
 }
 
 // Load discovers categories and templates below root. Immediate child

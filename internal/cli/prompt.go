@@ -16,7 +16,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
 
-	"templ/internal/catalog"
+	"github.com/xrzks/decal/internal/catalog"
 )
 
 // huhPrompter drives the interactive Charmbracelet Huh forms.

@@ -29,7 +29,7 @@ func TestRoot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Root: %v", err)
 		}
-		if want := filepath.Join(xdg, "templ"); root != want {
+		if want := filepath.Join(xdg, "decal"); root != want {
 			t.Fatalf("Root = %q, want %q", root, want)
 		}
 	})
@@ -40,7 +40,7 @@ func TestRoot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Root: %v", err)
 		}
-		if want := filepath.Join(home, ".config", "templ"); root != want {
+		if want := filepath.Join(home, ".config", "decal"); root != want {
 			t.Fatalf("Root = %q, want %q", root, want)
 		}
 	})
@@ -51,7 +51,7 @@ func TestRoot(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Root: %v", err)
 		}
-		if want := filepath.Join(home, ".config", "templ"); root != want {
+		if want := filepath.Join(home, ".config", "decal"); root != want {
 			t.Fatalf("Root = %q, want %q", root, want)
 		}
 	})

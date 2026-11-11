@@ -263,7 +263,7 @@ func TestCommandCancellationReportsOnStderr(t *testing.T) {
 	var stdout, stderr strings.Builder
 	cmd := New("test")
 	cmd.Writer, cmd.ErrWriter = &stdout, &stderr
-	err := cmd.Run(context.Background(), []string{"templ", "--config-dir", root})
+	err := cmd.Run(context.Background(), []string{"decal", "--config-dir", root})
 	if !errors.Is(err, ErrCancelled) {
 		t.Fatalf("Run = %v, want ErrCancelled so main exits with ExitCancelled", err)
 	}

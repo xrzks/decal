@@ -13,7 +13,7 @@ import (
 
 	"charm.land/huh/v2"
 
-	"templ/internal/catalog"
+	"github.com/xrzks/decal/internal/catalog"
 )
 
 type fakePrompter struct {
@@ -467,10 +467,10 @@ func TestVersionFlag(t *testing.T) {
 	var stdout strings.Builder
 	cmd := New("v1.2.3")
 	cmd.Writer = &stdout
-	if err := cmd.Run(context.Background(), []string{"templ", "--version"}); err != nil {
+	if err := cmd.Run(context.Background(), []string{"decal", "--version"}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if got, want := stdout.String(), "templ version v1.2.3\n"; got != want {
+	if got, want := stdout.String(), "decal version v1.2.3\n"; got != want {
 		t.Fatalf("--version printed %q, want %q", got, want)
 	}
 }
@@ -480,8 +480,8 @@ func TestCommandRejectsBadUsage(t *testing.T) {
 		var stdout, stderr strings.Builder
 		cmd := New("test")
 		cmd.Writer, cmd.ErrWriter = &stdout, &stderr
-		err := cmd.Run(context.Background(), append([]string{"templ"}, args...))
-		if err == nil || !strings.Contains(err.Error(), "see templ --help") {
+		err := cmd.Run(context.Background(), append([]string{"decal"}, args...))
+		if err == nil || !strings.Contains(err.Error(), "see decal --help") {
 			t.Fatalf("%v: err = %v, want a usage error", args, err)
 		}
 		// main prints the returned error; nothing else may be printed.

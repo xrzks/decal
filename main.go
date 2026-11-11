@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	"templ/internal/cli"
+	"github.com/xrzks/decal/internal/cli"
 )
 
 // version is set at build time with -ldflags "-X main.version=v1.2.3".

@@ -1,5 +1,5 @@
 // Package cli wires template discovery, prompts, rendering and file creation
-// into the templ command.
+// into the decal command.
 package cli
 
 import (
@@ -12,8 +12,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"templ/internal/catalog"
-	"templ/internal/generate"
+	"github.com/xrzks/decal/internal/catalog"
+	"github.com/xrzks/decal/internal/generate"
 )
 
 // ErrCancelled reports that the user aborted a prompt.
@@ -24,7 +24,7 @@ var ErrCancelled = errors.New("cancelled")
 const ExitCancelled = 130
 
 // ErrNoTerminal reports that the prompts cannot run without a terminal.
-var ErrNoTerminal = errors.New("templ needs an interactive terminal on stdin and stderr; set TERM=dumb to answer prompts from stdin")
+var ErrNoTerminal = errors.New("decal needs an interactive terminal on stdin and stderr; set TERM=dumb to answer prompts from stdin")
 
 // Prompter collects a category, a template and a template's form answers.
 type Prompter interface {
@@ -36,26 +36,26 @@ type Prompter interface {
 	Form(ctx context.Context, template *catalog.Template, checkOutput func(answers map[string]any) error) (map[string]any, error)
 }
 
-// New builds the templ command. version is reported by --version.
+// New builds the decal command. version is reported by --version.
 func New(version string) *cli.Command {
 	return &cli.Command{
-		Name:    "templ",
+		Name:    "decal",
 		Usage:   "Generate a file from a reusable template.",
 		Version: version,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "config-dir",
-				Usage: "template root directory (default: $XDG_CONFIG_HOME/templ or ~/.config/templ)",
+				Usage: "template root directory (default: $XDG_CONFIG_HOME/decal or ~/.config/decal)",
 			},
 		},
 		// Return usage errors instead of printing them with the full help; main
 		// prints the returned error, so this keeps it to a single line.
 		OnUsageError: func(_ context.Context, _ *cli.Command, err error, _ bool) error {
-			return fmt.Errorf("%w (see templ --help)", err)
+			return fmt.Errorf("%w (see decal --help)", err)
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if cmd.Args().Present() {
-				return fmt.Errorf("unexpected argument %q (see templ --help)", cmd.Args().First())
+				return fmt.Errorf("unexpected argument %q (see decal --help)", cmd.Args().First())
 			}
 			root, err := catalog.Root(cmd.String("config-dir"))
 			if err != nil {
