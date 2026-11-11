@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"strings"
@@ -313,7 +315,7 @@ func TestRunExampleServiceTemplate(t *testing.T) {
 		templateName: "Go service skeleton",
 		answers: map[string]any{
 			"name":        "myservice",
-			"description": "Package myservice serves things.",
+			"description": "Myservice serves things.",
 			"license":     "mit",
 			"features":    []string{"logging", "health"},
 			"dockerfile":  false,
@@ -330,7 +332,7 @@ func TestRunExampleServiceTemplate(t *testing.T) {
 	body := string(data)
 	for _, want := range []string{
 		"// Licensed under the MIT License.",
-		"package myservice",
+		"package main",
 		"log/slog",
 		"slog.Info(\"starting myservice\")",
 	} {
@@ -343,6 +345,58 @@ func TestRunExampleServiceTemplate(t *testing.T) {
 	}
 	if strings.Contains(body, "Wait for SIGINT") {
 		t.Fatalf("shutdown was not selected but rendered:\n%s", body)
+	}
+}
+
+func TestExampleServiceTemplateIsFormattedGo(t *testing.T) {
+	root := filepath.Join("..", "..", "examples", "templates")
+	featureSets := [][]string{{}, {"logging"}, {"logging", "shutdown", "health"}}
+	for _, license := range []string{"apache", "mit", "none"} {
+		for _, features := range featureSets {
+			for _, dockerfile := range []bool{true, false} {
+				name := fmt.Sprintf("%s/%v/%t", license, features, dockerfile)
+				t.Run(name, func(t *testing.T) {
+					dir := t.TempDir()
+					prompter := &fakePrompter{
+						categoryName: "service",
+						templateName: "Go service skeleton",
+						answers: map[string]any{
+							"name":        "myservice",
+							"description": "Myservice serves things.",
+							"license":     license,
+							"features":    features,
+							"dockerfile":  dockerfile,
+						},
+					}
+					if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}); err != nil {
+						t.Fatalf("Run: %v", err)
+					}
+					data, err := os.ReadFile(filepath.Join(dir, "myservice.go"))
+					if err != nil {
+						t.Fatalf("read output: %v", err)
+					}
+					formatted, err := format.Source(data)
+					if err != nil {
+						t.Fatalf("output is not valid Go: %v\n%s", err, data)
+					}
+					if string(formatted) != string(data) {
+						t.Fatalf("output is not gofmt-clean:\n%s", data)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	var stdout strings.Builder
+	cmd := New("v1.2.3")
+	cmd.Writer = &stdout
+	if err := cmd.Run(context.Background(), []string{"templ", "--version"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got, want := stdout.String(), "templ version v1.2.3\n"; got != want {
+		t.Fatalf("--version printed %q, want %q", got, want)
 	}
 }
 

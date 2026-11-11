@@ -4,14 +4,14 @@ output: "{{ .name }}.go"
 fields:
   - key: name
     type: input
-    label: Package name (also the output filename, so use lowercase letters)
+    label: Service name (also the output filename, so use lowercase letters)
     required: true
     default: myservice
   - key: description
     type: text
-    label: Package documentation
+    label: Command documentation
     required: true
-    default: Package myservice does something useful.
+    default: Myservice does something useful.
   - key: license
     type: select
     label: License header
@@ -40,12 +40,14 @@ fields:
     default: true
 ---
 {{- if eq .license "apache" }}// Licensed under the Apache License, Version 2.0.
-{{- else if eq .license "mit" }}// Licensed under the MIT License.
-{{- end }}
+
+{{ else if eq .license "mit" }}// Licensed under the MIT License.
+
+{{ end -}}
 /*
 {{ .description }}
 */
-package {{ .name }}
+package main
 
 {{- $logging := false }}
 {{- $shutdown := false }}
@@ -56,13 +58,17 @@ package {{ .name }}
   {{- if eq . "health" }}{{ $health = true }}{{ end }}
 {{- end }}
 
-// Selected building blocks: {{ range $i, $feature := .features }}{{ if $i }}, {{ end }}{{ $feature }}{{ end }}
+// Selected building blocks: {{ range $i, $feature := .features }}{{ if $i }}, {{ end }}{{ $feature }}{{ else }}none{{ end }}
 {{- if .dockerfile }}
 // A Dockerfile is described in the project README.
 {{- end }}
 
-{{ if $logging }}import "log/slog"
-{{ end }}import "os"
+import (
+{{- if $logging }}
+	"log/slog"
+{{- end }}
+	"os"
+)
 
 func main() {
 {{- if $logging }}

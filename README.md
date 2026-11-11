@@ -23,6 +23,14 @@ $ install -m 0755 templ ~/.local/bin/templ   # or anywhere on $PATH
 
 Requires Go 1.27 or newer.
 
+`templ --version` (or `-v`) prints the build version. A plain `go build` or
+`go install` reports the module or VCS version Go records in the binary; to
+stamp a release version, set it at build time:
+
+```console
+$ go build -ldflags "-X main.version=v1.0.0" -o templ .
+```
+
 ## Configuration layout
 
 The template root is, in order of precedence:
@@ -173,13 +181,30 @@ an error instead of stalling, and suggests setting `TERM=dumb`. In that mode
 stdin, which makes the command scriptable:
 
 ```console
-$ printf '2\n1\nmyservice\n' | TERM=dumb templ --config-dir ./examples/templates
+$ printf '2\n1\nmyservice\n\n\n\n\n' | TERM=dumb templ --config-dir ./examples/templates
 ```
 
-A blank line takes the field's default. Input is validated as it is read: an
-end-of-input before the last prompt answers it cancels the run, and an answer
-line longer than 64 KiB is rejected rather than silently replaced by the
-default.
+That answers the category (`2`, service), the template (`1`), and the service
+name (`myservice`), then takes the defaults for the remaining four fields.
+
+Each answer is one line. Selects take the option number. A multiselect prompt
+takes one option number per line, each toggling that option, until `0` or a
+blank line confirms the current selection. A blank line takes the field's
+default everywhere, so a blank first answer to a multiselect keeps its default
+selection. Input is validated as it is read: an end-of-input before the last
+prompt answers it cancels the run, and an answer line longer than 64 KiB is
+rejected rather than silently replaced by the default.
+
+## Exit status
+
+| Status | Meaning                                                                  |
+| ------ | ------------------------------------------------------------------------ |
+| `0`    | The file was created, or `--help`/`--version` was printed.               |
+| `1`    | An error: configuration, metadata, rendering, or the destination.        |
+| `130`  | A prompt was cancelled (`ctrl+c`, or input ended early). No file exists. |
+
+Errors and the cancellation notice go to stderr; the `Created <path>` line goes
+to stdout.
 
 ## Safety
 
@@ -219,7 +244,8 @@ $ /tmp/templ --config-dir /path/to/templ/examples/templates
    body.
 3. **Cancellation:** run again and press `ctrl+c` at the category prompt, then
    again at the template prompt and inside the form. Each time the command
-   prints `Cancelled. No file was created.`; `ls -A` shows nothing new.
+   prints `Cancelled. No file was created.` and `echo $?` shows `130`;
+   `ls -A` shows nothing new.
 4. **Conflict:** with `meeting-notes.md` already present, run the notes template
    again. The command reports `destination already exists` and the file is
    untouched.

@@ -18,6 +18,10 @@ import (
 // ErrCancelled reports that the user aborted a prompt.
 var ErrCancelled = errors.New("cancelled")
 
+// ExitCancelled is the exit status after a cancelled run: 128 + SIGINT, the
+// conventional status for a command interrupted with ctrl+c.
+const ExitCancelled = 130
+
 // ErrNoTerminal reports that the prompts cannot run without a terminal.
 var ErrNoTerminal = errors.New("templ needs an interactive terminal; set TERM=dumb to answer prompts from stdin")
 
@@ -28,11 +32,12 @@ type Prompter interface {
 	Form(ctx context.Context, template *catalog.Template) (map[string]any, error)
 }
 
-// New builds the templ command.
-func New() *cli.Command {
+// New builds the templ command. version is reported by --version.
+func New(version string) *cli.Command {
 	return &cli.Command{
-		Name:  "templ",
-		Usage: "Generate a file from a reusable template.",
+		Name:    "templ",
+		Usage:   "Generate a file from a reusable template.",
+		Version: version,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "config-dir",
@@ -49,11 +54,10 @@ func New() *cli.Command {
 				return fmt.Errorf("cannot determine the working directory: %w", err)
 			}
 
-			out := cmd.Root().Writer
-			err = Run(ctx, root, huhPrompter{}, dir, out)
+			err = Run(ctx, root, huhPrompter{}, dir, cmd.Root().Writer)
 			if errors.Is(err, ErrCancelled) {
-				fmt.Fprintln(out, "Cancelled. No file was created.")
-				return nil
+				// Report it here; the caller only maps it to ExitCancelled.
+				fmt.Fprintln(cmd.Root().ErrWriter, "Cancelled. No file was created.")
 			}
 			return err
 		},

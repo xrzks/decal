@@ -141,7 +141,7 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 			if value == nil {
 				value = []string{}
 			}
-			groups = append(groups, huh.NewGroup(huh.NewMultiSelect[string]().
+			var multiSelect huh.Field = huh.NewMultiSelect[string]().
 				Title(field.Label).
 				Options(selectOptions(field.Options)...).
 				Value(&value).
@@ -151,7 +151,11 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 						return nil
 					}
 					return requiredSelection(field)(values)
-				})))
+				})
+			if accessible {
+				multiSelect = blankConfirmsMultiSelect{multiSelect}
+			}
+			groups = append(groups, huh.NewGroup(multiSelect))
 			collect = append(collect, func() { answers[field.Key] = value })
 
 		case catalog.FieldConfirm:
@@ -253,6 +257,45 @@ func (r *promptInput) Read(p []byte) (int, error) {
 		}
 	}
 	r.err = err
+	return n, err
+}
+
+// Huh's accessible MultiSelect only confirms on "0" and rejects a blank line,
+// unlike every other prompt where a blank line takes the default. Translate a
+// blank line into "0" so it confirms the current selection, which starts out
+// as the field's default.
+type blankConfirmsMultiSelect struct{ huh.Field }
+
+func (m blankConfirmsMultiSelect) RunAccessible(w io.Writer, r io.Reader) error {
+	return m.Field.RunAccessible(w, &blankConfirms{Reader: r})
+}
+
+type blankConfirms struct {
+	io.Reader
+	midLine        bool
+	pendingNewline bool
+}
+
+func (r *blankConfirms) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.pendingNewline {
+		r.pendingNewline = false
+		p[0] = '\n'
+		return 1, nil
+	}
+	// Read one byte at a time, like promptInput, so nothing beyond the current
+	// line is buffered.
+	n, err := r.Reader.Read(p[:1])
+	if n > 0 {
+		if p[0] == '\n' && !r.midLine {
+			p[0] = '0'
+			r.pendingNewline = true
+		} else {
+			r.midLine = p[0] != '\n'
+		}
+	}
 	return n, err
 }
 
