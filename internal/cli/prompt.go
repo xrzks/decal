@@ -2,11 +2,13 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -104,12 +106,37 @@ func choose[T any](ctx context.Context, what, title string, items []T, label, ke
 	return item, nil
 }
 
-func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[string]any, error) {
+func (huhPrompter) Form(ctx context.Context, template *catalog.Template, checkOutput func(map[string]any) error) (map[string]any, error) {
 	input := &promptInput{Reader: os.Stdin}
 	accessible := accessibleMode()
 	answers := make(map[string]any, len(template.Fields))
 	groups := make([]*huh.Group, 0, len(template.Fields))
 	var collect []func()
+
+	// Check the output name on the last field it depends on: every answer it
+	// uses is known there, and the user can change that answer in place. Huh
+	// does not leave a field that fails validation, so checking earlier fields
+	// against later defaults could block a valid choice. Accessible prompts
+	// re-read a rejected answer from the next input line, which would shift
+	// every later scripted answer, so they leave the check to the final write.
+	nameKey := ""
+	if !accessible && checkOutput != nil {
+		for _, field := range template.Fields {
+			if slices.Contains(template.OutputFields, field.Key) {
+				nameKey = field.Key
+			}
+		}
+	}
+	checkName := func(key string, value any) error {
+		if key != nameKey {
+			return nil
+		}
+		for _, collectAnswer := range collect {
+			collectAnswer()
+		}
+		answers[key] = value
+		return checkOutput(answers)
+	}
 
 	for _, field := range template.Fields {
 		switch field.Type {
@@ -118,7 +145,9 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 			groups = append(groups, huh.NewGroup(huh.NewInput().
 				Title(field.Label).
 				Value(&value).
-				Validate(requiredString(field, accessible))))
+				Validate(func(value string) error {
+					return cmp.Or(requiredString(field, accessible)(value), checkName(field.Key, value))
+				})))
 			collect = append(collect, func() { answers[field.Key] = value })
 
 		case catalog.FieldText:
@@ -127,7 +156,9 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 				Title(field.Label).
 				Lines(5).
 				Value(&value).
-				Validate(requiredString(field, accessible))))
+				Validate(func(value string) error {
+					return cmp.Or(requiredString(field, accessible)(value), checkName(field.Key, value))
+				})))
 			collect = append(collect, func() { answers[field.Key] = value })
 
 		case catalog.FieldSelect:
@@ -138,7 +169,8 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 			groups = append(groups, huh.NewGroup(huh.NewSelect[string]().
 				Title(field.Label).
 				Options(selectOptions(field.Options)...).
-				Value(&value)))
+				Value(&value).
+				Validate(func(value string) error { return checkName(field.Key, value) })))
 			collect = append(collect, func() { answers[field.Key] = value })
 
 		case catalog.FieldMultiSelect:
@@ -155,7 +187,7 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 					if input.err != nil {
 						return nil
 					}
-					return requiredSelection(field)(values)
+					return cmp.Or(requiredSelection(field)(values), checkName(field.Key, values))
 				})
 			if accessible {
 				multiSelect = blankConfirmsMultiSelect{multiSelect}
@@ -167,7 +199,8 @@ func (huhPrompter) Form(ctx context.Context, template *catalog.Template) (map[st
 			value := field.DefaultBool()
 			groups = append(groups, huh.NewGroup(huh.NewConfirm().
 				Title(field.Label).
-				Value(&value)))
+				Value(&value).
+				Validate(func(value bool) error { return checkName(field.Key, value) })))
 			collect = append(collect, func() { answers[field.Key] = value })
 
 		default:
@@ -194,11 +227,12 @@ func accessibleMode() bool { return os.Getenv("TERM") == "dumb" }
 func runPrompt(ctx context.Context, form *huh.Form, input *promptInput) error {
 	if !accessibleMode() {
 		// Huh's full-screen mode needs a terminal: without one Bubble Tea's
-		// input loop stalls until its two-minute timeout.
-		if !term.IsTerminal(os.Stdin.Fd()) {
+		// input loop stalls until its two-minute timeout. Prompts are drawn on
+		// stderr, keeping stdout for the created path.
+		if !term.IsTerminal(os.Stdin.Fd()) || !term.IsTerminal(os.Stderr.Fd()) {
 			return ErrNoTerminal
 		}
-		return form.RunWithContext(ctx)
+		return form.WithOutput(os.Stderr).RunWithContext(ctx)
 	}
 	if input == nil {
 		input = &promptInput{Reader: os.Stdin}
@@ -227,9 +261,9 @@ func runAccessible(ctx context.Context, form *huh.Form, input *promptInput) (err
 		}
 		err = input.err
 	}()
-	// Huh writes styled text straight to stdout in accessible mode; downsample
-	// it so TERM=dumb and pipes get plain text.
-	output := colorprofile.NewWriter(os.Stdout, os.Environ())
+	// Prompts go to stderr, keeping stdout for the created path. Downsample
+	// Huh's styled text so TERM=dumb and pipes get plain text.
+	output := colorprofile.NewWriter(os.Stderr, os.Environ())
 	return form.WithInput(input).WithOutput(output).RunWithContext(ctx)
 }
 

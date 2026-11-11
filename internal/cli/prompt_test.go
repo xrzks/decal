@@ -54,7 +54,7 @@ func TestRealPrompterEOFLeavesNoFile(t *testing.T) {
 			root := t.TempDir()
 			addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\nfields:\n"+tt.fields+"---\nbody\n")
 			dir := t.TempDir()
-			err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{})
+			err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard)
 			if !errors.Is(err, ErrCancelled) {
 				t.Fatalf("Run = %v, want ErrCancelled", err)
 			}
@@ -72,7 +72,7 @@ func TestRealPrompterNoTerminal(t *testing.T) {
 	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\n---\nbody\n")
 	addTemplate(t, root, "docs", "b.tmpl", "---\noutput: b.txt\n---\nbody\n")
 	dir := t.TempDir()
-	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{})
+	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard)
 	if !errors.Is(err, ErrNoTerminal) {
 		t.Fatalf("Run = %v, want ErrNoTerminal", err)
 	}
@@ -88,7 +88,7 @@ func TestRealPrompterPicksLoneChoicesWithoutPrompting(t *testing.T) {
 	root := t.TempDir()
 	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\n---\nbody\n")
 	dir := t.TempDir()
-	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}); err != nil {
+	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a.txt")); err != nil {
@@ -96,18 +96,18 @@ func TestRealPrompterPicksLoneChoicesWithoutPrompting(t *testing.T) {
 	}
 }
 
-func TestRealPrompterAccessibleOutputIsPlain(t *testing.T) {
+func TestRealPrompterAccessibleOutputIsPlainAndOnStderr(t *testing.T) {
 	promptStdin(t, "")
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := os.Stdout
-	os.Stdout = w
-	t.Cleanup(func() { os.Stdout = original })
+	original := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = original })
 	root := t.TempDir()
 	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\n---\nbody\n")
-	_ = Run(context.Background(), root, huhPrompter{}, t.TempDir(), &strings.Builder{})
+	_ = Run(context.Background(), root, huhPrompter{}, t.TempDir(), &strings.Builder{}, io.Discard)
 	w.Close()
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -135,7 +135,7 @@ fields:
 {{ .title }}:{{ range .choices }}{{ . }}{{ end }}
 `)
 	dir := t.TempDir()
-	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}); err != nil {
+	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "a.txt"))
@@ -158,7 +158,7 @@ fields:
 {{ .name }}
 `)
 	dir := t.TempDir()
-	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}); err != nil {
+	if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "a.txt"))
@@ -180,7 +180,7 @@ fields:
 [{{ .body }}]
 `)
 	dir := t.TempDir()
-	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{})
+	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard)
 	if !errors.Is(err, errLineTooLong) {
 		t.Fatalf("Run = %v, want errLineTooLong", err)
 	}
@@ -217,7 +217,7 @@ fields:
 			root := t.TempDir()
 			addTemplate(t, root, "docs", "a.tmpl", template)
 			dir := t.TempDir()
-			if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}); err != nil {
+			if err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(filepath.Join(dir, "a.txt"))
@@ -233,7 +233,7 @@ func TestRealPrompterAccessibleRequiredMultiSelectRejectsBlankWithoutSelection(t
 	root := t.TempDir()
 	addTemplate(t, root, "docs", "a.tmpl", "---\noutput: a.txt\nfields:\n  - key: x\n    type: multiselect\n    required: true\n    options: [{value: a}]\n---\nbody\n")
 	dir := t.TempDir()
-	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{})
+	err := Run(context.Background(), root, huhPrompter{}, dir, &strings.Builder{}, io.Discard)
 	if !errors.Is(err, ErrCancelled) {
 		t.Fatalf("Run = %v, want ErrCancelled once input ends after the rejected blank line", err)
 	}

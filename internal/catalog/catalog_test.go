@@ -81,10 +81,7 @@ func TestLoadDiscoversAndSorts(t *testing.T) {
 	// A root-level file is not a category.
 	writeTemplate(t, filepath.Join(root, "stray.md"), simpleTemplate("stray.md", "stray"))
 
-	categories, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	categories := mustLoad(t, root)
 	if len(categories) != 2 {
 		t.Fatalf("got %d categories, want 2", len(categories))
 	}
@@ -123,10 +120,7 @@ func TestLoadFollowsSymlinks(t *testing.T) {
 		t.Fatalf("symlink template: %v", err)
 	}
 
-	categories, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	categories := mustLoad(t, root)
 	if len(categories) != 2 || categories[0].Templates[0].Body != "a" || categories[1].Templates[0].Body != "b" {
 		t.Fatalf("categories = %+v, want linked/a.txt and plain/b.txt", categories)
 	}
@@ -139,10 +133,7 @@ func TestLoadIgnoresDotEntries(t *testing.T) {
 	writeTemplate(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/main\n")
 	writeTemplate(t, filepath.Join(root, "docs", ".DS_Store"), "\x00\x01binary")
 
-	categories, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	categories := mustLoad(t, root)
 	if len(categories) != 1 || categories[0].Name != "docs" {
 		t.Fatalf("categories = %+v, want only docs", categories)
 	}
@@ -151,9 +142,22 @@ func TestLoadIgnoresDotEntries(t *testing.T) {
 	}
 }
 
+// mustLoad loads root and fails the test on any error or skipped entry.
+func mustLoad(t *testing.T, root string) []Category {
+	t.Helper()
+	categories, problems, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(problems) > 0 {
+		t.Fatalf("Load problems: %v", problems)
+	}
+	return categories
+}
+
 func TestLoadErrors(t *testing.T) {
 	t.Run("missing root", func(t *testing.T) {
-		_, err := Load(filepath.Join(t.TempDir(), "missing"))
+		_, _, err := Load(filepath.Join(t.TempDir(), "missing"))
 		if err == nil || !strings.Contains(err.Error(), "does not exist") {
 			t.Fatalf("err = %v, want a does-not-exist error", err)
 		}
@@ -162,69 +166,125 @@ func TestLoadErrors(t *testing.T) {
 	t.Run("no categories", func(t *testing.T) {
 		root := t.TempDir()
 		writeTemplate(t, filepath.Join(root, "stray.md"), simpleTemplate("stray.md", "x"))
-		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), "no categories found") {
-			t.Fatalf("err = %v, want a no-categories error", err)
+		_, _, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "no templates found") {
+			t.Fatalf("err = %v, want a no-templates error", err)
 		}
 	})
 
-	t.Run("empty category", func(t *testing.T) {
+	t.Run("only empty categories", func(t *testing.T) {
 		root := t.TempDir()
 		if err := os.Mkdir(filepath.Join(root, "empty"), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), "contains no templates") {
-			t.Fatalf("err = %v, want a contains-no-templates error", err)
+		_, _, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "no templates found") {
+			t.Fatalf("err = %v, want a no-templates error", err)
 		}
 	})
 
-	t.Run("unreadable template", func(t *testing.T) {
-		root := t.TempDir()
-		path := filepath.Join(root, "docs", "a.md")
-		writeTemplate(t, path, simpleTemplate("a.md", "a"))
-		if err := os.Chmod(path, 0o000); err != nil {
-			t.Fatalf("chmod: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
-		if _, err := os.ReadFile(path); err == nil {
-			t.Skip("filesystem still allows reading a 000 file")
-		}
-		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), "cannot read") {
-			t.Fatalf("err = %v, want a cannot-read error", err)
-		}
-	})
-
-	t.Run("dangling symlink", func(t *testing.T) {
-		root := t.TempDir()
-		writeTemplate(t, filepath.Join(root, "docs", "a.md"), simpleTemplate("a.md", "a"))
-		link := filepath.Join(root, "docs", "gone.md")
-		if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
-			t.Fatalf("symlink: %v", err)
-		}
-		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), "cannot follow symlink "+link) {
-			t.Fatalf("err = %v, want a symlink error naming %s", err, link)
-		}
-	})
-
-	t.Run("malformed metadata names the template", func(t *testing.T) {
+	t.Run("only broken templates", func(t *testing.T) {
 		root := t.TempDir()
 		path := filepath.Join(root, "docs", "a.md")
 		writeTemplate(t, path, "---\nname: Broken\n---\nbody")
-		_, err := Load(root)
-		if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), `"output"`) {
-			t.Fatalf("err = %v, want a metadata error naming %s", err, path)
+		_, problems, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "no usable templates") {
+			t.Fatalf("err = %v, want a no-usable-templates error", err)
+		}
+		if len(problems) != 1 || !strings.Contains(problems[0].Error(), path) {
+			t.Fatalf("problems = %v, want one naming %s", problems, path)
 		}
 	})
 }
 
-func TestLoadExamples(t *testing.T) {
-	categories, err := Load(filepath.Join("..", "..", "examples", "templates"))
-	if err != nil {
-		t.Fatalf("Load examples: %v", err)
+func TestLoadSkipsEmptyCategories(t *testing.T) {
+	root := t.TempDir()
+	writeTemplate(t, filepath.Join(root, "docs", "a.md"), simpleTemplate("a.md", "a"))
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
+	categories := mustLoad(t, root)
+	if len(categories) != 1 || categories[0].Name != "docs" {
+		t.Fatalf("categories = %+v, want only docs", categories)
+	}
+}
+
+func TestLoadSkipsBrokenEntries(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, root string) (path string)
+		want  string
+	}{
+		{
+			name: "unreadable template",
+			setup: func(t *testing.T, root string) string {
+				path := filepath.Join(root, "docs", "b.md")
+				writeTemplate(t, path, simpleTemplate("b.md", "b"))
+				if err := os.Chmod(path, 0o000); err != nil {
+					t.Fatalf("chmod: %v", err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+				if _, err := os.ReadFile(path); err == nil {
+					t.Skip("filesystem still allows reading a 000 file")
+				}
+				return path
+			},
+			want: "cannot read",
+		},
+		{
+			name: "dangling template symlink",
+			setup: func(t *testing.T, root string) string {
+				link := filepath.Join(root, "docs", "gone.md")
+				if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+					t.Fatalf("symlink: %v", err)
+				}
+				return link
+			},
+			want: "cannot follow symlink",
+		},
+		{
+			name: "dangling category symlink",
+			setup: func(t *testing.T, root string) string {
+				link := filepath.Join(root, "gone")
+				if err := os.Symlink(filepath.Join(root, "missing"), link); err != nil {
+					t.Fatalf("symlink: %v", err)
+				}
+				return link
+			},
+			want: "cannot follow symlink",
+		},
+		{
+			name: "malformed metadata in another category",
+			setup: func(t *testing.T, root string) string {
+				path := filepath.Join(root, "other", "broken.md")
+				writeTemplate(t, path, "---\nname: Broken\n---\nbody")
+				return path
+			},
+			want: `"output"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTemplate(t, filepath.Join(root, "docs", "a.md"), simpleTemplate("a.md", "a"))
+			path := tt.setup(t, root)
+
+			categories, problems, err := Load(root)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if len(categories) != 1 || len(categories[0].Templates) != 1 || categories[0].Templates[0].FileName != "a.md" {
+				t.Fatalf("categories = %+v, want only docs/a.md", categories)
+			}
+			if len(problems) != 1 || !strings.Contains(problems[0].Error(), path) || !strings.Contains(problems[0].Error(), tt.want) {
+				t.Fatalf("problems = %v, want one naming %s and containing %q", problems, path, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadExamples(t *testing.T) {
+	categories := mustLoad(t, filepath.Join("..", "..", "examples", "templates"))
 	seen := map[string]bool{}
 	for _, category := range categories {
 		seen[category.Name] = true

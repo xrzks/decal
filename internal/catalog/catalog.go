@@ -36,6 +36,9 @@ type Template struct {
 	Body string
 	// Fields are the ordered form fields, empty when the template has no form.
 	Fields []Field
+	// OutputFields are the keys of the fields the output filename uses, in
+	// order of first use.
+	OutputFields []string
 }
 
 // Root resolves the template root directory. An explicit override wins, then
@@ -58,43 +61,51 @@ func Root(override string) (string, error) {
 // Load discovers categories and templates below root. Immediate child
 // directories are categories; regular files directly inside them are
 // templates. Symlinks are followed, so dotfile managers like GNU stow work.
-func Load(root string) ([]Category, error) {
+//
+// One broken entry does not hide the others: a template or category that
+// cannot be loaded is left out and reported in problems, and a category
+// without templates is left out silently. err is set only when root cannot be
+// read or nothing usable is left.
+func Load(root string) (categories []Category, problems []error, err error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("template directory %s does not exist; create it or pass --config-dir", root)
+			return nil, nil, fmt.Errorf("template directory %s does not exist; create it or pass --config-dir", root)
 		}
 		if errors.Is(err, fs.ErrPermission) {
-			return nil, fmt.Errorf("cannot read template directory %s: permission denied", root)
+			return nil, nil, fmt.Errorf("cannot read template directory %s: permission denied", root)
 		}
-		return nil, fmt.Errorf("cannot read template directory %s: %w", root, err)
+		return nil, nil, fmt.Errorf("cannot read template directory %s: %w", root, err)
 	}
 
-	categories := make([]Category, 0, len(entries))
 	for _, entry := range entries {
 		if isHidden(entry.Name()) {
 			continue
 		}
 		mode, err := entryMode(root, entry)
 		if err != nil {
-			return nil, err
+			problems = append(problems, err)
+			continue
 		}
 		if !mode.IsDir() {
 			continue
 		}
-		category, err := loadCategory(entry.Name(), filepath.Join(root, entry.Name()))
-		if err != nil {
-			return nil, err
+		category, categoryProblems := loadCategory(entry.Name(), filepath.Join(root, entry.Name()))
+		problems = append(problems, categoryProblems...)
+		if len(category.Templates) > 0 {
+			categories = append(categories, category)
 		}
-		categories = append(categories, category)
 	}
 	if len(categories) == 0 {
-		return nil, fmt.Errorf("no categories found in %s; add one directory per category", root)
+		if len(problems) > 0 {
+			return nil, problems, fmt.Errorf("no usable templates in %s", root)
+		}
+		return nil, nil, fmt.Errorf("no templates found in %s; add one directory per category with templates in it", root)
 	}
 
 	// Directory names are unique, so Name alone is a total order.
 	slices.SortFunc(categories, func(a, b Category) int { return strings.Compare(a.Name, b.Name) })
-	return categories, nil
+	return categories, problems, nil
 }
 
 // isHidden reports whether name belongs to a dot entry. Discovery ignores
@@ -115,39 +126,41 @@ func entryMode(dir string, entry fs.DirEntry) (fs.FileMode, error) {
 	return info.Mode(), nil
 }
 
-func loadCategory(name, dir string) (Category, error) {
+// loadCategory returns the category with every template that loaded, and a
+// problem for each one that did not.
+func loadCategory(name, dir string) (Category, []error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return Category{}, fmt.Errorf("cannot read category %q in %s: %w", name, filepath.Dir(dir), err)
+		return Category{}, []error{fmt.Errorf("cannot read category %q in %s: %w", name, filepath.Dir(dir), err)}
 	}
 
 	category := Category{Name: name, Dir: dir}
+	var problems []error
 	for _, entry := range entries {
 		if isHidden(entry.Name()) {
 			continue
 		}
 		mode, err := entryMode(dir, entry)
 		if err != nil {
-			return Category{}, err
+			problems = append(problems, err)
+			continue
 		}
 		if !mode.IsRegular() {
 			continue
 		}
 		template, err := loadTemplate(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return Category{}, err
+			problems = append(problems, err)
+			continue
 		}
 		category.Templates = append(category.Templates, template)
-	}
-	if len(category.Templates) == 0 {
-		return Category{}, fmt.Errorf("category %q in %s contains no templates", name, filepath.Dir(dir))
 	}
 
 	// Display names may collide, so fall back to the filename.
 	slices.SortFunc(category.Templates, func(a, b *Template) int {
 		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.FileName, b.FileName))
 	})
-	return category, nil
+	return category, problems
 }
 
 func loadTemplate(path string) (*Template, error) {

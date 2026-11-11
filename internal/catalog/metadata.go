@@ -7,8 +7,10 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	texttemplate "text/template"
+	"text/template/parse"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -115,17 +117,21 @@ func Parse(path string, data []byte) (*Template, error) {
 		Output:   raw.Output,
 		Body:     string(body),
 	}
+	if raw.Name != nil && strings.TrimSpace(*raw.Name) != "" {
+		template.Name = strings.TrimSpace(*raw.Name)
+	}
+
 	// Catch syntax errors before the user fills in a form, not after.
+	trees := make([]*parse.Tree, 0, 2)
 	for _, part := range []struct{ name, source string }{
 		{"output filename", template.Output},
 		{"body", template.Body},
 	} {
-		if _, err := texttemplate.New(part.name).Parse(part.source); err != nil {
+		parsed, err := texttemplate.New(part.name).Parse(part.source)
+		if err != nil {
 			return nil, fail("%s: cannot parse template: %v", part.name, err)
 		}
-	}
-	if raw.Name != nil && strings.TrimSpace(*raw.Name) != "" {
-		template.Name = strings.TrimSpace(*raw.Name)
+		trees = append(trees, parsed.Tree)
 	}
 
 	fields, err := parseFields(raw.Fields)
@@ -133,7 +139,99 @@ func Parse(path string, data []byte) (*Template, error) {
 		return nil, fail("%v", err)
 	}
 	template.Fields = fields
+
+	// Catch misspelled field names too: rendering would only reject them after
+	// the form has been filled in.
+	declared := make([]string, 0, len(fields))
+	for _, field := range fields {
+		declared = append(declared, field.Key)
+	}
+	for i, tree := range trees {
+		for _, ref := range fieldRefs(tree) {
+			if !slices.Contains(declared, ref.key) {
+				location, _ := tree.ErrorContext(ref.node)
+				return nil, fail("%s: field %q is not declared%s", location, ref.key, declaredList(declared))
+			}
+			if i == 0 && !slices.Contains(template.OutputFields, ref.key) {
+				template.OutputFields = append(template.OutputFields, ref.key)
+			}
+		}
+	}
 	return template, nil
+}
+
+func declaredList(keys []string) string {
+	if len(keys) == 0 {
+		return " (the template declares no fields)"
+	}
+	return " (declared: " + strings.Join(keys, ", ") + ")"
+}
+
+type fieldRef struct {
+	key  string
+	node parse.Node
+}
+
+// fieldRefs returns every use of a field of the template data in tree's main
+// template, in source order: {{ .key }} wherever the dot is still the data,
+// and {{ $.key }} anywhere. Inside range and with the dot is something else,
+// and in {{ define }}d templates it is whatever the caller passed, so those
+// uses are left to the renderer.
+func fieldRefs(tree *parse.Tree) []fieldRef {
+	var refs []fieldRef
+	var walk func(node parse.Node, dotIsData bool)
+	walk = func(node parse.Node, dotIsData bool) {
+		switch n := node.(type) {
+		case *parse.ListNode:
+			if n == nil {
+				return
+			}
+			for _, child := range n.Nodes {
+				walk(child, dotIsData)
+			}
+		case *parse.ActionNode:
+			walk(n.Pipe, dotIsData)
+		case *parse.IfNode:
+			walk(n.Pipe, dotIsData)
+			walk(n.List, dotIsData)
+			walk(n.ElseList, dotIsData)
+		case *parse.RangeNode:
+			walk(n.Pipe, dotIsData)
+			walk(n.List, false)
+			walk(n.ElseList, dotIsData)
+		case *parse.WithNode:
+			walk(n.Pipe, dotIsData)
+			walk(n.List, false)
+			walk(n.ElseList, dotIsData)
+		case *parse.TemplateNode:
+			walk(n.Pipe, dotIsData)
+		case *parse.PipeNode:
+			if n == nil {
+				return
+			}
+			for _, command := range n.Cmds {
+				walk(command, dotIsData)
+			}
+		case *parse.CommandNode:
+			for _, arg := range n.Args {
+				walk(arg, dotIsData)
+			}
+		case *parse.ChainNode:
+			walk(n.Node, dotIsData)
+		case *parse.FieldNode:
+			if dotIsData {
+				refs = append(refs, fieldRef{key: n.Ident[0], node: n})
+			}
+		case *parse.VariableNode:
+			if n.Ident[0] == "$" && len(n.Ident) > 1 {
+				refs = append(refs, fieldRef{key: n.Ident[1], node: n})
+			}
+		}
+	}
+	if tree != nil {
+		walk(tree.Root, true)
+	}
+	return refs
 }
 
 // splitFrontMatter returns the YAML between the leading "---" line and the

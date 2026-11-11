@@ -4,6 +4,7 @@ package generate
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,25 @@ func ValidateName(name string) error {
 		return fmt.Errorf("output filename %q contains control characters", name)
 	}
 	return validateHostName(name)
+}
+
+// Check reports whether name could be created inside dir right now: it must be
+// a valid name and nothing may exist there yet. It lets callers flag a clash
+// before asking for more input; Write still creates the file exclusively, so a
+// file that appears after Check is never overwritten.
+func Check(dir, name string) error {
+	if err := ValidateName(name); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, name)
+	_, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		return fmt.Errorf("%w: %s", ErrExists, path)
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("cannot check %s: %w", path, err)
+	}
+	return nil
 }
 
 // writeFile is a seam for tests that need a write failure.

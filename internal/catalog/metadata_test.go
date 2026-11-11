@@ -316,3 +316,100 @@ func TestParseFrontMatterIsNotPartOfBody(t *testing.T) {
 		t.Fatalf("Body = %q", template.Body)
 	}
 }
+
+func TestParseRejectsUndeclaredFields(t *testing.T) {
+	const fields = "fields:\n  - key: name\n    type: input\n  - key: tags\n    type: multiselect\n    options: [{value: a}]\n"
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name:   "body",
+			source: "---\noutput: a.txt\n" + fields + "---\nhello\n{{ .nmae }}\n",
+			want:   []string{"body:2:", `field "nmae" is not declared`, "(declared: name, tags)"},
+		},
+		{
+			name:   "output without fields",
+			source: "---\noutput: \"{{ .name }}.txt\"\n---\nbody\n",
+			want:   []string{"output filename:1:", `field "name" is not declared`, "declares no fields"},
+		},
+		{
+			name:   "condition",
+			source: "---\noutput: a.txt\n" + fields + "---\n{{ if .flag }}x{{ end }}\n",
+			want:   []string{`field "flag" is not declared`},
+		},
+		{
+			name:   "root variable inside range",
+			source: "---\noutput: a.txt\n" + fields + "---\n{{ range .tags }}{{ $.nmae }}{{ end }}\n",
+			want:   []string{`field "nmae" is not declared`},
+		},
+		{
+			name:   "parenthesized pipeline",
+			source: "---\noutput: a.txt\n" + fields + "---\n{{ printf \"%s\" (.nmae) }}\n",
+			want:   []string{`field "nmae" is not declared`},
+		},
+		{
+			name:   "range else",
+			source: "---\noutput: a.txt\n" + fields + "---\n{{ range .tags }}{{ . }}{{ else }}{{ .none }}{{ end }}\n",
+			want:   []string{`field "none" is not declared`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse("template.md", []byte(tt.source))
+			if err == nil {
+				t.Fatal("Parse succeeded, want an undeclared-field error")
+			}
+			for _, want := range append(tt.want, "template.md") {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %v, want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseLeavesOtherDotsToTheRenderer(t *testing.T) {
+	// Inside range and with, and in defined templates, the dot is not the
+	// answers map, so its fields cannot be checked against the declared keys.
+	source := `---
+output: a.txt
+fields:
+  - key: tags
+    type: multiselect
+    options: [{value: a}]
+  - key: title
+    type: input
+---
+{{ range .tags }}{{ .Upper }}{{ end }}{{ with .title }}{{ .Len }}{{ end }}
+{{ define "item" }}{{ .Anything }}{{ end }}{{ template "item" .title }}
+`
+	if _, err := Parse("template.md", []byte(source)); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+}
+
+func TestParseOutputFields(t *testing.T) {
+	source := `---
+output: "{{ .b }}-{{ .a }}{{ if $.c }}-{{ .b }}{{ end }}.txt"
+fields:
+  - key: a
+    type: input
+  - key: b
+    type: input
+  - key: c
+    type: confirm
+  - key: d
+    type: input
+---
+{{ .d }}
+`
+	template, err := Parse("template.md", []byte(source))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got, want := strings.Join(template.OutputFields, ","), "b,a,c"; got != want {
+		t.Fatalf("OutputFields = %s, want %s", got, want)
+	}
+}

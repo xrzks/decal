@@ -161,3 +161,25 @@ func TestWriteRemovesIncompleteFile(t *testing.T) {
 		t.Fatalf("incomplete file was not removed: %v", err)
 	}
 }
+
+func TestCheck(t *testing.T) {
+	dir := t.TempDir()
+	if err := Check(dir, "free.txt"); err != nil {
+		t.Fatalf("Check(free) = %v, want nil", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "taken.txt"), nil, 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := Check(dir, "taken.txt"); !errors.Is(err, ErrExists) {
+		t.Fatalf("Check(taken) = %v, want ErrExists", err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "missing"), filepath.Join(dir, "dangling.txt")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := Check(dir, "dangling.txt"); !errors.Is(err, ErrExists) {
+		t.Fatalf("Check(dangling symlink) = %v, want ErrExists", err)
+	}
+	if err := Check(dir, "../escape.txt"); err == nil || !strings.Contains(err.Error(), "path separators") {
+		t.Fatalf("Check(unsafe) = %v, want a validation error", err)
+	}
+}

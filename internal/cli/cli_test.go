@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,8 @@ type fakePrompter struct {
 	categoryCalls int
 	templateCalls int
 	formCalls     int
+	// checkErr is what the form's output-name check said about answers.
+	checkErr error
 }
 
 func (f *fakePrompter) fail(stage string) error {
@@ -60,7 +63,7 @@ func (f *fakePrompter) ChooseTemplate(_ context.Context, templates []*catalog.Te
 	return nil, errors.New("template not found")
 }
 
-func (f *fakePrompter) Form(_ context.Context, _ *catalog.Template) (map[string]any, error) {
+func (f *fakePrompter) Form(_ context.Context, _ *catalog.Template, checkOutput func(map[string]any) error) (map[string]any, error) {
 	f.formCalls++
 	if err := f.fail("form"); err != nil {
 		return nil, err
@@ -69,6 +72,7 @@ func (f *fakePrompter) Form(_ context.Context, _ *catalog.Template) (map[string]
 	for key, value := range f.answers {
 		answers[key] = value
 	}
+	f.checkErr = checkOutput(answers)
 	return answers, nil
 }
 
@@ -110,7 +114,7 @@ func TestRunWithoutForm(t *testing.T) {
 	out := &strings.Builder{}
 	prompter := &fakePrompter{categoryName: "notes", templateName: "Meeting notes"}
 
-	if err := Run(context.Background(), root, prompter, dir, out); err != nil {
+	if err := Run(context.Background(), root, prompter, dir, out, io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if prompter.formCalls != 0 {
@@ -169,7 +173,7 @@ package {{ .name }}
 		},
 	}
 
-	if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}); err != nil {
+	if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if prompter.formCalls != 1 {
@@ -201,7 +205,7 @@ func TestRunCancellationLeavesNoFile(t *testing.T) {
 				err:          ErrCancelled,
 			}
 
-			err := Run(context.Background(), root, prompter, dir, &strings.Builder{})
+			err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard)
 			if !errors.Is(err, ErrCancelled) {
 				t.Fatalf("err = %v, want ErrCancelled", err)
 			}
@@ -213,25 +217,56 @@ func TestRunCancellationLeavesNoFile(t *testing.T) {
 }
 
 func TestRunRejectsMalformedMetadataBeforePrompting(t *testing.T) {
-	root := newRoot(t)
-	addTemplate(t, root, "docs", "a.md", "---\nname: Broken\n---\nbody\n")
-
-	prompter := &fakePrompter{categoryName: "docs", templateName: "Broken"}
-	err := Run(context.Background(), root, prompter, t.TempDir(), &strings.Builder{})
-	if err == nil {
-		t.Fatal("Run succeeded, want a metadata error")
+	sources := map[string]string{
+		"missing output":   "---\nname: Broken\n---\nbody\n",
+		"undeclared field": "---\nname: Broken\noutput: a.md\nfields:\n  - key: name\n    type: input\n---\n{{ .nmae }}\n",
 	}
-	if prompter.categoryCalls != 0 {
-		t.Fatalf("category prompt was shown %d times, want 0", prompter.categoryCalls)
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			root := newRoot(t)
+			addTemplate(t, root, "docs", "a.md", source)
+
+			var stderr strings.Builder
+			prompter := &fakePrompter{categoryName: "docs", templateName: "Broken"}
+			err := Run(context.Background(), root, prompter, t.TempDir(), &strings.Builder{}, &stderr)
+			if err == nil || !strings.Contains(err.Error(), "no usable templates") {
+				t.Fatalf("err = %v, want a no-usable-templates error", err)
+			}
+			if want := "warning: skipped template " + filepath.Join(root, "docs", "a.md"); !strings.Contains(stderr.String(), want) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+			}
+			if prompter.categoryCalls != 0 {
+				t.Fatalf("category prompt was shown %d times, want 0", prompter.categoryCalls)
+			}
+		})
+	}
+}
+
+func TestRunSkipsBrokenTemplatesWithAWarning(t *testing.T) {
+	root := newRoot(t)
+	addTemplate(t, root, "docs", "a.md", "---\noutput: a.md\n---\nbody\n")
+	addTemplate(t, root, "other", "broken.md", "---\nname: Broken\n---\nbody\n")
+
+	dir := t.TempDir()
+	var stderr strings.Builder
+	prompter := &fakePrompter{categoryName: "docs", templateName: "a.md"}
+	if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, &stderr); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "warning: skipped template "+filepath.Join(root, "other", "broken.md")) {
+		t.Fatalf("stderr = %q, want a warning naming the broken template", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.md")); err != nil {
+		t.Fatalf("output: %v", err)
 	}
 }
 
 func TestRunReportsEmptyConfiguration(t *testing.T) {
 	root := newRoot(t)
 	prompter := &fakePrompter{}
-	err := Run(context.Background(), root, prompter, t.TempDir(), &strings.Builder{})
-	if err == nil || !strings.Contains(err.Error(), "no categories found") {
-		t.Fatalf("err = %v, want a no-categories error", err)
+	err := Run(context.Background(), root, prompter, t.TempDir(), &strings.Builder{}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "no templates found") {
+		t.Fatalf("err = %v, want a no-templates error", err)
 	}
 	if prompter.categoryCalls != 0 {
 		t.Fatalf("category prompt was shown %d times, want 0", prompter.categoryCalls)
@@ -240,7 +275,7 @@ func TestRunReportsEmptyConfiguration(t *testing.T) {
 
 func TestRunRefusesExistingDestination(t *testing.T) {
 	root := newRoot(t)
-	addTemplate(t, root, "docs", "a.md", "---\noutput: a.md\n---\nnew content\n")
+	addTemplate(t, root, "docs", "a.md", "---\noutput: a.md\nfields:\n  - key: x\n    type: input\n---\nnew content\n")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.md")
@@ -249,9 +284,13 @@ func TestRunRefusesExistingDestination(t *testing.T) {
 	}
 
 	prompter := &fakePrompter{categoryName: "docs", templateName: "a.md"}
-	err := Run(context.Background(), root, prompter, dir, &strings.Builder{})
+	err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "destination already exists") {
 		t.Fatalf("err = %v, want a destination error", err)
+	}
+	// The name does not depend on the answers, so the form is not wasted.
+	if prompter.formCalls != 0 {
+		t.Fatalf("form was shown %d times, want 0", prompter.formCalls)
 	}
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
@@ -259,6 +298,40 @@ func TestRunRefusesExistingDestination(t *testing.T) {
 	}
 	if string(data) != "original" {
 		t.Fatalf("existing file was modified: %q", data)
+	}
+}
+
+func TestRunChecksDynamicOutputNameInForm(t *testing.T) {
+	const template = "---\noutput: \"{{ .name }}.md\"\nfields:\n  - key: name\n    type: input\n---\nbody\n"
+	tests := []struct {
+		name string
+		want string
+	}{
+		{name: "taken", want: "taken.md already exists here"},
+		{name: "a/b", want: "path separators"},
+		{name: "free", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := newRoot(t)
+			addTemplate(t, root, "docs", "a.md", template)
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "taken.md"), []byte("original"), 0o644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+
+			prompter := &fakePrompter{categoryName: "docs", templateName: "a.md", answers: map[string]any{"name": tt.name}}
+			_ = Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard)
+			if tt.want == "" {
+				if prompter.checkErr != nil {
+					t.Fatalf("check = %v, want nil", prompter.checkErr)
+				}
+				return
+			}
+			if prompter.checkErr == nil || !strings.Contains(prompter.checkErr.Error(), tt.want) {
+				t.Fatalf("check = %v, want it to contain %q", prompter.checkErr, tt.want)
+			}
+		})
 	}
 }
 
@@ -272,7 +345,7 @@ func TestRunRejectsUnsafeRenderedOutput(t *testing.T) {
 	}
 
 	prompter := &fakePrompter{categoryName: "docs", templateName: "a.md"}
-	err := Run(context.Background(), root, prompter, dir, &strings.Builder{})
+	err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "path separators") {
 		t.Fatalf("err = %v, want a path separator error", err)
 	}
@@ -285,9 +358,11 @@ func TestRunRejectsUnsafeRenderedOutput(t *testing.T) {
 }
 
 func TestRunRenderErrorsCreateNothing(t *testing.T) {
+	// Undeclared fields are rejected on load; a field of a string is not.
+	const fields = "fields:\n  - key: x\n    type: input\n"
 	tests := map[string]string{
-		"body":   "---\noutput: a.md\n---\n{{ .missing }}\n",
-		"output": "---\noutput: \"{{ .missing }}.md\"\n---\nbody\n",
+		"body":   "---\noutput: a.md\n" + fields + "---\n{{ .x.missing }}\n",
+		"output": "---\noutput: \"{{ .x.missing }}.md\"\n" + fields + "---\nbody\n",
 	}
 	for part, source := range tests {
 		t.Run(part, func(t *testing.T) {
@@ -295,9 +370,9 @@ func TestRunRenderErrorsCreateNothing(t *testing.T) {
 			addTemplate(t, root, "docs", "a.md", source)
 			dir := t.TempDir()
 
-			prompter := &fakePrompter{categoryName: "docs", templateName: "a.md"}
-			err := Run(context.Background(), root, prompter, dir, &strings.Builder{})
-			if err == nil || !strings.Contains(err.Error(), part) {
+			prompter := &fakePrompter{categoryName: "docs", templateName: "a.md", answers: map[string]any{"x": "a"}}
+			err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), part) || !strings.Contains(err.Error(), "cannot execute") {
 				t.Fatalf("err = %v, want it to name the %s", err, part)
 			}
 			if names := listDir(t, dir); len(names) != 0 {
@@ -322,7 +397,7 @@ func TestRunExampleServiceTemplate(t *testing.T) {
 		},
 	}
 
-	if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}); err != nil {
+	if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "myservice.go"))
@@ -368,7 +443,7 @@ func TestExampleServiceTemplateIsFormattedGo(t *testing.T) {
 							"dockerfile":  dockerfile,
 						},
 					}
-					if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}); err != nil {
+					if err := Run(context.Background(), root, prompter, dir, &strings.Builder{}, io.Discard); err != nil {
 						t.Fatalf("Run: %v", err)
 					}
 					data, err := os.ReadFile(filepath.Join(dir, "myservice.go"))

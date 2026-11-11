@@ -52,14 +52,17 @@ directly inside a category are templates:
 ```
 
 Discovery is not recursive. Symlinked categories and templates are followed, so
-a root managed with GNU stow or a similar tool works; a dangling symlink is an
-error. Dot-prefixed
+a root managed with GNU stow or a similar tool works. Dot-prefixed
 directories and files are ignored, so `.git` or `.DS_Store` entries never break
 discovery. Categories and templates are listed sorted by display name, with the
 filename as a tie-breaker.
-A missing root, a root without categories, a category without templates, an
-unreadable template, or malformed metadata all stop the command with a message
-naming the offending path before any prompt or output file exists.
+
+One broken entry does not hide the rest. An unreadable or malformed template, an
+unreadable category, or a dangling symlink is left out with a
+`warning: skipped …` line on stderr naming the path and the problem, and the
+remaining templates are offered as usual. A category without templates is left
+out silently. The command stops before any prompt only when the root is missing
+or unreadable, or when no usable template is left.
 
 Try the bundled examples without touching your own configuration:
 
@@ -119,8 +122,9 @@ Field types map to Huh controls:
 being interpreted as consent. Metadata is validated in full before the form is
 shown: invalid or duplicate keys, unsupported types, options on non-choice
 fields, duplicate or empty option values, incompatible defaults, defaults
-outside the declared options, and template syntax errors in `output` or the
-body all fail early.
+outside the declared options, template syntax errors in `output` or the body,
+and references to undeclared fields (`{{ .nmae }}` when the field is `name`) all
+fail early.
 
 A complete example:
 
@@ -172,16 +176,21 @@ same map of typed answers, keyed by field key. Variables, `if`, `else`, `range`,
 is the `name` field's answer; `{{ range .features }}` walks a multiselect
 answer.
 
-There are no custom functions, shell commands, or hooks. Undefined variables are
-errors (`missingkey=error`), never silently empty. Both parts are parsed when
-templates are discovered, before any prompt, and rendered entirely before the
-destination file is touched. Errors name whether they came from the metadata,
-the output filename, or the body.
+There are no custom functions, shell commands, or hooks. Both parts are parsed
+when templates are discovered, before any prompt, and every `{{ .key }}` and
+`{{ $.key }}` is checked against the declared fields there, with the line and
+column of a misspelled one. Inside `range` and `with`, and in `define`d
+templates, the dot is something other than the answers, so those uses are
+checked when rendering instead: an undefined key is an error
+(`missingkey=error`), never silently empty. Both parts are rendered entirely
+before the destination file is touched. Errors name whether they came from the
+metadata, the output filename, or the body.
 
 ## Non-interactive use
 
-The prompts need a terminal. When stdin is not a terminal, `templ` stops with
-an error instead of stalling, and suggests setting `TERM=dumb`. In that mode
+The prompts are drawn on stderr, so stdout carries only the `Created <path>`
+line. They need a terminal on stdin and stderr; otherwise `templ` stops with an
+error instead of stalling, and suggests setting `TERM=dumb`. In that mode
 [Huh](https://github.com/charmbracelet/huh) answers one line per prompt from
 stdin, which makes the command scriptable:
 
@@ -211,8 +220,8 @@ rejected rather than silently replaced by the default.
 | `1`    | An error: usage, configuration, metadata, rendering, or the destination. |
 | `130`  | A prompt was cancelled (`ctrl+c`, or input ended early). No file exists. |
 
-Errors and the cancellation notice go to stderr; the `Created <path>` line goes
-to stdout.
+Prompts, warnings, errors and the cancellation notice go to stderr; only the
+`Created <path>` line goes to stdout.
 
 ## Safety
 
@@ -222,6 +231,12 @@ to stdout.
   normalized into a different destination.
 - Existing destinations are never overwritten — files, directories, and symlinks
   (including dangling ones) are all refused. There is no overwrite mode.
+- A clash is reported as early as possible. A fixed `output` name is checked
+  before the form is shown. A name built from answers is checked in the
+  full-screen form when the last field it uses is submitted, so that answer can
+  be changed in place. Line-by-line `TERM=dumb` prompts skip that in-form check,
+  because a re-asked prompt would shift every later scripted answer, and fail
+  at the end instead.
 - Creation uses exclusive creation, so a file that appears between validation
   and writing is not overwritten either.
 - Cancelling any prompt, invalid metadata, failed form validation, and rendering
@@ -255,8 +270,10 @@ $ /tmp/templ --config-dir /path/to/templ/examples/templates
    prints `Cancelled. No file was created.` and `echo $?` shows `130`;
    `ls -A` shows nothing new.
 4. **Conflict:** with `meeting-notes.md` already present, run the notes template
-   again. The command reports `destination already exists` and the file is
-   untouched.
+   again. The command reports `destination already exists` before any form, and
+   the file is untouched. Then run the service template and accept the name
+   `myservice` again: the name field shows `myservice.go already exists here`
+   and does not advance until the name is changed.
 
 ## Development
 
