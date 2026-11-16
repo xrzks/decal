@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
 	"os"
 	"runtime/debug"
 
@@ -14,13 +14,13 @@ import (
 var version string
 
 func main() {
-	log.SetFlags(0)
 	err := cli.New(buildVersion()).Run(context.Background(), os.Args)
 	switch {
 	case errors.Is(err, cli.ErrCancelled):
 		os.Exit(cli.ExitCancelled)
 	case err != nil:
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 }
 

@@ -40,7 +40,7 @@ type Prompter interface {
 func New(version string) *cli.Command {
 	return &cli.Command{
 		Name:    "decal",
-		Usage:   "Generate a file from a reusable template.",
+		Usage:   "generate a file from a reusable template",
 		Version: version,
 		Flags: []cli.Flag{
 			&cli.StringFlag{

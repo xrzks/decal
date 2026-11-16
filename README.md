@@ -4,39 +4,38 @@
 directory that should receive the file, pick a category and a template, answer
 the template's form if it has one, and the file is rendered and written there.
 
-```console
-$ cd ~/src/new-project
-$ decal
-```
+## Install
 
-Categories and templates are discovered from your template root and presented
-with [Charmbracelet Huh](https://github.com/charmbracelet/huh) select prompts;
-a category or template that is the only choice is picked without asking. The
-template's form (if any) follows, then the output filename and body are
-rendered with Go's [`text/template`](https://pkg.go.dev/text/template).
-
-## Build and install
-
-```console
-$ go install github.com/xrzks/decal@latest
-```
-
-or from a checkout:
-
-```console
-$ go build -o decal .
-$ install -m 0755 decal ~/.local/bin/decal   # or anywhere on $PATH
+```sh
+go install github.com/xrzks/decal@latest
 ```
 
 Requires Go 1.27 or newer.
 
-`decal --version` (or `-v`) prints the build version. A plain `go build` or
-`go install` reports the module or VCS version Go records in the binary; to
-stamp a release version, set it at build time:
+## Usage
 
-```console
-$ go build -ldflags "-X main.version=v1.0.0" -o decal .
+```text
+decal [options]
 ```
+
+```sh
+cd ~/src/new-project
+decal
+```
+
+Categories and templates are discovered from your template root and presented
+with [Charmbracelet Huh](https://github.com/charmbracelet/huh) select prompts; a
+category or template that is the only choice is picked without asking. The
+template's form (if any) follows, then the output filename and body are rendered
+with Go's [`text/template`](https://pkg.go.dev/text/template).
+
+## Options
+
+| Flag                  | Alias | Description                                                                  |
+| --------------------- | ----- | ---------------------------------------------------------------------------- |
+| `--config-dir <path>` |       | template root directory (default: $XDG_CONFIG_HOME/decal or ~/.config/decal) |
+| `--help`              | `-h`  | show help                                                                    |
+| `--version`           | `-v`  | print the version                                                            |
 
 ## Configuration layout
 
@@ -58,10 +57,10 @@ directly inside a category are templates:
 ```
 
 Discovery is not recursive. Symlinked categories and templates are followed, so
-a root managed with GNU stow or a similar tool works. Dot-prefixed
-directories and files are ignored, so `.git` or `.DS_Store` entries never break
-discovery. Categories and templates are listed sorted by display name, with the
-filename as a tie-breaker.
+a root managed with GNU stow or a similar tool works. Dot-prefixed directories
+and files are ignored, so `.git` or `.DS_Store` entries never break discovery.
+Categories and templates are listed sorted by display name, with the filename as
+a tie-breaker.
 
 One broken entry does not hide the rest. An unreadable or malformed template, an
 unreadable category, or a dangling symlink is left out with a
@@ -72,8 +71,8 @@ or unreadable, or when no usable template is left.
 
 Try the bundled examples without touching your own configuration:
 
-```console
-$ decal --config-dir ./examples/templates
+```sh
+decal --config-dir ./examples/templates
 ```
 
 ## Authoring a template
@@ -200,8 +199,8 @@ error instead of stalling, and suggests setting `TERM=dumb`. In that mode
 [Huh](https://github.com/charmbracelet/huh) answers one line per prompt from
 stdin, which makes the command scriptable:
 
-```console
-$ printf '2\n1\nmyservice\n\n\n\n\n' | TERM=dumb decal --config-dir ./examples/templates
+```sh
+printf '2\n1\nmyservice\n\n\n\n\n' | TERM=dumb decal --config-dir ./examples/templates
 ```
 
 That answers the category (`2`, service), the template (`1`), and the service
@@ -241,8 +240,8 @@ Prompts, warnings, errors and the cancellation notice go to stderr; only the
   before the form is shown. A name built from answers is checked in the
   full-screen form when the last field it uses is submitted, so that answer can
   be changed in place. Line-by-line `TERM=dumb` prompts skip that in-form check,
-  because a re-asked prompt would shift every later scripted answer, and fail
-  at the end instead.
+  because a re-asked prompt would shift every later scripted answer, and fail at
+  the end instead.
 - Creation uses exclusive creation, so a file that appears between validation
   and writing is not overwritten either.
 - Cancelling any prompt, invalid metadata, failed form validation, and rendering
@@ -253,28 +252,28 @@ Prompts, warnings, errors and the cancellation notice go to stderr; only the
 
 Build the binary and work in a scratch directory with the bundled templates:
 
-```console
-$ go build -o /tmp/decal .
-$ mkdir -p /tmp/decal-smoke && cd /tmp/decal-smoke
-$ /tmp/decal --config-dir /path/to/decal/examples/templates
+```sh
+go build -o /tmp/decal .
+mkdir -p /tmp/decal-smoke && cd /tmp/decal-smoke
+/tmp/decal --config-dir /path/to/decal/examples/templates
 ```
 
 1. **Selection:** the category prompt lists `notes` and `service`. Navigate with
-   the arrow keys or `j`/`k` and press `enter` on `notes`. `Meeting notes` is the
-   category's only template, so it is picked without a prompt. No form appears; `meeting-notes.md` is created and its path is
-   printed. Check that the file exists and does not contain `---` front matter.
-2. **Form navigation:** run again and choose `service`.
-   The form shows one field per screen, so press `enter` to advance to the next.
-   Fill the input (try submitting it empty first to see the required error),
-   submit the multiline text with `enter` (`alt+enter` or `ctrl+j` inserts a
-   newline), change the select with `enter`, toggle multiselect options with
-   `space` and confirm with `enter`, and answer the confirm with `y`/`n` or
-   `enter`. The file is named from the `name` answer and contains the rendered
-   body.
+   the arrow keys or `j`/`k` and press `enter` on `notes`. `Meeting notes` is
+   the category's only template, so it is picked without a prompt. No form
+   appears; `meeting-notes.md` is created and its path is printed. Check that
+   the file exists and does not contain `---` front matter.
+2. **Form navigation:** run again and choose `service`. The form shows one field
+   per screen, so press `enter` to advance to the next. Fill the input (try
+   submitting it empty first to see the required error), submit the multiline
+   text with `enter` (`alt+enter` or `ctrl+j` inserts a newline), change the
+   select with `enter`, toggle multiselect options with `space` and confirm with
+   `enter`, and answer the confirm with `y`/`n` or `enter`. The file is named
+   from the `name` answer and contains the rendered body.
 3. **Cancellation:** run again and press `ctrl+c` at the category prompt, then
-   again inside the form. Each time the command
-   prints `Cancelled. No file was created.` and `echo $?` shows `130`;
-   `ls -A` shows nothing new.
+   again inside the form. Each time the command prints
+   `Cancelled. No file was created.` and `echo $?` shows `130`; `ls -A` shows
+   nothing new.
 4. **Conflict:** with `meeting-notes.md` already present, run the notes template
    again. The command reports `destination already exists` before any form, and
    the file is untouched. Then run the service template and accept the name
@@ -283,11 +282,20 @@ $ /tmp/decal --config-dir /path/to/decal/examples/templates
 
 ## Development
 
-```console
-$ go test ./...
+```sh
+go test ./...
+go vet ./...
+go build .
 ```
 
-The packages are kept independently testable: `internal/catalog` (discovery and
-metadata), `internal/generate` (filename validation and exclusive creation), and
-`internal/cli` (template rendering and the Huh-driven workflow, tested through a
-fake prompter).
+`decal --version` reports the version Go records at install time. To stamp a
+version into a local build, use `go build -ldflags "-X main.version=v1.0.0" .`.
+
+The root `main.go` is a thin entry point. The packages are kept independently
+testable: `internal/catalog` (discovery and metadata), `internal/generate`
+(filename validation and exclusive creation), and `internal/cli` (template
+rendering and the Huh-driven workflow, tested through a fake prompter).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
